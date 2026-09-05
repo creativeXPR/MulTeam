@@ -1,16 +1,29 @@
 {
   "name": "multeam",
   "version": "1.0.0",
-  "description": "",
-  "main": "main.js",
+  "description": "Multi-user real-time collaborative code editor built on Electron, Monaco, Yjs and Firebase.",
+  "main": "src/main/index.js",
   "scripts": {
-    "start": "electron ."
+    "build:renderer": "node build/bundle.js",
+    "start": "npm run build:renderer && electron .",
+    "dev": "npm run build:renderer && electron . --dev",
+    "dist": "npm run build:renderer && electron-builder",
+    "test": "node --test tests/**/*.test.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
-    "electron": "^44.1.0"
+    "electron": "^44.1.0",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.24.0"
+  },
+  "dependencies": {
+    "firebase": "^10.13.0",
+    "monaco-editor": "^0.52.0",
+    "y-monaco": "^0.1.6",
+    "y-protocols": "^1.0.6",
+    "yjs": "^13.6.18"
   }
 }

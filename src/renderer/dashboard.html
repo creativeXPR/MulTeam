@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>MulTeam — Projects</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="css/style.css" />
+  </head>
+  <body>
+    <div class="dashboard-bg">
+      <div class="topbar">
+        <div class="brand">
+          <span class="brand-mark"></span>
+          MulTeam
+        </div>
+        <div class="topbar-right" id="topbar-signed-out">
+          <button class="secondary icon-btn" id="topbar-signin-btn">Sign in</button>
+        </div>
+        <div class="topbar-right" id="topbar-signed-in" hidden>
+          <span id="user-label" class="user-label"></span>
+          <button class="secondary icon-btn" id="sign-out-btn">
+            <span class="btn-icon" id="signout-icon"></span>
+            Sign out
+          </button>
+        </div>
+      </div>
+
+      <div class="dashboard-shell">
+        <div class="dashboard-header">
+          <div>
+            <h1>Your projects</h1>
+            <p class="dashboard-subtitle">Pick up where you left off, or start something new — everything here lives on this machine.</p>
+          </div>
+          <button class="primary icon-btn" id="new-project-btn">
+            <span class="btn-icon" id="new-project-icon"></span>
+            New project
+          </button>
+        </div>
+
+        <div class="search-field">
+          <span class="btn-icon" id="search-icon"></span>
+          <input type="text" id="project-search" placeholder="Search your projects" />
+        </div>
+
+        <ul class="project-list" id="project-list"></ul>
+        <div class="empty-state" id="empty-state" hidden>
+          <p>No projects yet</p>
+          <p>Create one to start writing code — no account needed.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Create / edit project -->
+    <div class="modal-overlay" id="project-modal" hidden>
+      <form class="modal-card" id="project-form">
+        <h2 id="project-modal-title">New project</h2>
+        <div class="field">
+          <label for="project-name">Project name</label>
+          <input id="project-name" type="text" required autofocus />
+        </div>
+        <div class="field">
+          <label>Folder</label>
+          <button type="button" class="secondary" id="project-folder-btn">Choose folder…</button>
+          <p class="folder-path" id="project-folder-path"></p>
+        </div>
+        <label class="toggle-field">
+          <input type="checkbox" id="project-cloud-toggle" />
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+          <span class="toggle-label">Enable cloud sync</span>
+        </label>
+        <p class="field-hint">Lets you share this project and collaborate with others in real time (live mode). Requires an account.</p>
+        <p class="error-text" id="project-error"></p>
+        <div class="modal-actions">
+          <button type="button" class="secondary" id="project-cancel">Cancel</button>
+          <button type="submit" class="primary" id="project-submit">Create</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Delete project -->
+    <div class="modal-overlay" id="delete-modal" hidden>
+      <div class="modal-card">
+        <h2>Delete project</h2>
+        <p class="modal-sub" id="delete-modal-sub">This only removes it from MulTeam — your files stay on disk.</p>
+        <div class="delete-choices" id="delete-choices" hidden>
+          <label class="radio-field"><input type="radio" name="delete-scope" value="local" checked /> Remove locally only <span class="field-hint">Stays in the cloud — reachable again once you're online.</span></label>
+          <label class="radio-field"><input type="radio" name="delete-scope" value="cloud" /> Remove from cloud only <span class="field-hint">Keeps your local files and folder.</span></label>
+          <label class="radio-field"><input type="radio" name="delete-scope" value="both" /> Remove both</label>
+        </div>
+        <p class="error-text" id="delete-error"></p>
+        <div class="modal-actions">
+          <button type="button" class="secondary" id="delete-cancel">Cancel</button>
+          <button type="button" class="primary danger" id="delete-confirm">Delete</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="js/dist/dashboard.js"></script>
+  </body>
+</html>

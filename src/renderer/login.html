@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>MulTeam — Sign in</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="css/style.css" />
+  </head>
+  <body>
+    <div class="auth-shell">
+      <div class="auth-decoration">
+        <!--
+          Stands in for the referenced circuit/node photo: a hand-drawn,
+          tileable inline SVG pattern instead of an embedded image — crisp at
+          any size, trivial to rotate/fade, and adds zero binary weight.
+        -->
+        <svg class="auth-decoration-svg" viewBox="0 0 320 320" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <pattern id="circuit" width="70" height="70" patternUnits="userSpaceOnUse">
+              <circle cx="8" cy="10" r="2.4" fill="currentColor" />
+              <circle cx="52" cy="26" r="2.4" fill="currentColor" />
+              <circle cx="26" cy="56" r="2.4" fill="currentColor" />
+              <circle cx="64" cy="62" r="1.6" fill="currentColor" />
+              <path
+                d="M8 10 L52 26 M52 26 L26 56 M26 56 L8 10 M52 26 L70 14 M26 56 L64 62"
+                stroke="currentColor"
+                stroke-width="1"
+                fill="none"
+              />
+            </pattern>
+          </defs>
+          <rect width="320" height="320" fill="url(#circuit)" />
+        </svg>
+
+        <div class="auth-decoration-content">
+          <span class="brand-mark brand-mark-lg"></span>
+          <h1>MulTeam</h1>
+          <p>Real-time collaborative coding, wherever you write it.</p>
+        </div>
+      </div>
+
+      <div class="auth-form-panel">
+        <button type="button" class="back-link" id="back-to-dashboard-btn">
+          <span class="btn-icon" id="back-to-dashboard-icon"></span>
+          Back to projects
+        </button>
+
+        <div class="auth-card">
+          <h2 id="title">Sign in to MulTeam</h2>
+          <form id="login-form">
+            <div class="field" hidden>
+              <label for="display-name">Name</label>
+              <input id="display-name" type="text" autocomplete="name" />
+            </div>
+            <div class="field">
+              <label for="email">Email</label>
+              <input id="email" type="email" autocomplete="email" required />
+            </div>
+            <div class="field">
+              <label for="password">Password</label>
+              <input id="password" type="password" autocomplete="current-password" required minlength="6" />
+            </div>
+            <p class="error-text" id="error"></p>
+            <button type="submit" class="primary" id="submit-btn">Sign in</button>
+          </form>
+          <button type="button" class="secondary" id="google-btn">Continue with Google</button>
+          <button type="button" class="secondary" id="toggle-mode">Don't have an account? Sign up</button>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="js/dist/login.js"></script>
+  </body>
+</html>

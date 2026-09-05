@@ -1,0 +1,20 @@
+{
+  "firestore": [
+    {
+      "database": "multeam",
+      "rules": "firebase/firestore.rules"
+    }
+  ],
+  "database": {
+    "rules": "firebase/database.rules.json"
+  },
+  "storage": {
+    "rules": "firebase/storage.rules"
+  },
+  "hosting": {
+    "site": "multeam",
+    "public": "public",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [{ "source": "**", "destination": "/index.html" }]
+  }
+}

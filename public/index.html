@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MulTeam — Code together, in real time</title>
+    <meta name="description" content="MulTeam is a desktop code editor with real-time multi-user collaboration, native file access, and offline-first sync." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <nav class="nav">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        MulTeam
+      </div>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="https://github.com/">Source</a>
+      </div>
+      <a class="btn btn-primary" href="#download">Get MulTeam</a>
+    </nav>
+
+    <header class="hero">
+      <span class="eyebrow">Now with real-time collaboration</span>
+      <h1>Code together, in real time — without leaving your desktop.</h1>
+      <p>
+        MulTeam pairs a native file system with Monaco's editing engine and
+        conflict-free real-time sync, so your whole team can work in the same
+        file at once — online or off.
+      </p>
+      <div class="hero-actions" id="download">
+        <a class="btn btn-primary" href="#">Download for desktop</a>
+        <a class="btn btn-secondary" href="#features">See what's inside</a>
+      </div>
+    </header>
+
+    <section class="features" id="features">
+      <div class="feature-card">
+        <div class="feature-icon">⚡</div>
+        <h3>Real-time collaboration</h3>
+        <p>Low-latency cursor sync and conflict-free merges powered by Yjs — everyone edits the same document, no locking.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">👥</div>
+        <h3>Live presence</h3>
+        <p>See who's online, where their cursor is, and what they're editing — right in the workspace bar.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🗂️</div>
+        <h3>Native file access</h3>
+        <p>Open a real project folder from disk. MulTeam reads and writes files directly — nothing is trapped in the cloud.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📶</div>
+        <h3>Offline-first</h3>
+        <p>Keep editing without a connection. Changes queue locally and merge automatically the moment you're back online.</p>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <span>© 2026 MulTeam</span>
+      <span>Built with Electron, Monaco, Yjs &amp; Firebase</span>
+    </footer>
+  </body>
+</html>

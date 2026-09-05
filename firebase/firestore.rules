@@ -1,0 +1,32 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isProjectMember(ownerId, projectId) {
+      let project = get(/databases/$(database)/documents/users/$(ownerId)/projects/$(projectId));
+      return isAuthenticated() && (project.data.collaborators[request.auth.uid] != null);
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == userId;
+
+      // Cloud-enabled projects live under their owner's doc (see
+      // main/projects.js for the matching local registry entry).
+      match /projects/{projectId} {
+        allow read: if isAuthenticated() && resource.data.collaborators[request.auth.uid] != null;
+        allow create: if isAuthenticated() && request.resource.data.ownerId == request.auth.uid && userId == request.auth.uid;
+        allow update, delete: if isAuthenticated() && resource.data.collaborators[request.auth.uid] == "owner";
+      }
+    }
+
+    match /documents/{docId} {
+      allow read, write: if isAuthenticated() && isProjectMember(resource.data.ownerId, resource.data.projectId);
+      allow create: if isAuthenticated() && isProjectMember(request.resource.data.ownerId, request.resource.data.projectId);
+    }
+  }
+}

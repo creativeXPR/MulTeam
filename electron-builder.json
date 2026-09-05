@@ -1,0 +1,23 @@
+{
+  "appId": "com.multeam.app",
+  "productName": "MulTeam",
+  "directories": {
+    "output": "dist",
+    "buildResources": "build"
+  },
+  "files": [
+    "src/**/*",
+    "package.json",
+    "!src/renderer/js/firebaseConfig.js"
+  ],
+  "mac": {
+    "category": "public.app-category.developer-tools",
+    "target": ["dmg", "zip"]
+  },
+  "win": {
+    "target": ["nsis", "portable"]
+  },
+  "linux": {
+    "target": ["AppImage", "deb"]
+  }
+}

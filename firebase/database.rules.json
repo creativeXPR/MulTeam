@@ -1,0 +1,36 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "docs": {
+      "$docId": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+
+        "updates": {
+          "$pushId": {
+            ".validate": "newData.hasChildren(['state', 'origin'])"
+          }
+        },
+
+        "awareness": {
+          "$clientId": {
+            ".write": "auth != null"
+          }
+        },
+
+        "snapshot": {
+          ".validate": "newData.hasChildren(['state', 'updatedAt'])"
+        }
+      }
+    },
+
+    "projectMembers": {
+      "$projectId": {
+        ".read": "auth != null && data.child(auth.uid).exists()",
+        ".write": false
+      }
+    }
+  }
+}

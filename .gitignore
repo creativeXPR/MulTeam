@@ -1,1 +1,5 @@
 node_modules/**
+dist/**
+src/renderer/js/dist/**
+src/preload/dist/**
+src/renderer/js/firebaseConfig.js
