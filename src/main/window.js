@@ -20,7 +20,7 @@ async function createMainWindow() {
     }
   });
 
-  win.loadURL(`http://localhost:${port}/dashboard.html`);
+  win.loadURL(`http://localhost:${port}/app.html`);
   win.on('closed', () => server.close());
 
   return win;

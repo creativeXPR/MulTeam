@@ -13,14 +13,15 @@ import * as monaco from 'monaco-editor';
 import * as Y from 'yjs';
 import { MonacoBinding } from 'y-monaco';
 import { FirebaseProvider } from './sync.js';
+import { monacoOptionsFromSettings } from './settings.js';
 
-let themeDefined = false;
+let themesDefined = false;
 
-// White editing surface for now (chrome around it — sidebar/tabs/living-room
-// bar — stays the dark purple theme). Revisit once a final look is picked.
-function defineMulteamTheme() {
-  if (themeDefined) return;
-  themeDefined = true;
+// Matches the app shell's light/dark tokens (see style.css / theme.js)
+// instead of shipping Monaco's stock vs/vs-dark look.
+function defineMulteamThemes() {
+  if (themesDefined) return;
+  themesDefined = true;
 
   monaco.editor.defineTheme('multeam-light', {
     base: 'vs',
@@ -28,12 +29,33 @@ function defineMulteamTheme() {
     rules: [],
     colors: {
       'editor.background': '#ffffff',
-      'editor.lineHighlightBackground': '#f4f4fa',
+      'editor.lineHighlightBackground': '#f7f5fe',
       'editorGutter.background': '#ffffff',
-      'editorCursor.foreground': '#6b4ef0',
-      'editor.selectionBackground': '#c7b9f755'
+      'editorCursor.foreground': '#6d4aff',
+      'editor.selectionBackground': '#a78bfa33'
     }
   });
+
+  monaco.editor.defineTheme('multeam-dark', {
+    base: 'vs-dark',
+    inherit: true,
+    rules: [],
+    colors: {
+      'editor.background': '#141020',
+      'editor.lineHighlightBackground': '#1b1629',
+      'editorGutter.background': '#141020',
+      'editorCursor.foreground': '#8b6bff',
+      'editor.selectionBackground': '#8b6bff33',
+      'minimap.background': '#141020'
+    }
+  });
+}
+
+// Called by shell.js whenever the app theme toggles, so the currently open
+// editor (if any) re-themes along with everything else.
+export function setMonacoTheme(theme) {
+  defineMulteamThemes();
+  monaco.editor.setTheme(theme === 'dark' ? 'multeam-dark' : 'multeam-light');
 }
 
 function languageFromPath(filePath) {
@@ -59,27 +81,23 @@ export class CollaborativeWorkspace {
     this.editor = null;
   }
 
-  initialize(initialContent = '') {
-    defineMulteamTheme();
+  initialize(initialContent = '', theme = 'light') {
+    defineMulteamThemes();
 
     // Purely local (non-cloud) projects never touch Yjs/Firebase at all —
     // just a plain Monaco editor seeded straight from disk content.
     this.editor = monaco.editor.create(this.container, {
       value: this.collaborative ? '' : initialContent,
       language: languageFromPath(this.filePath),
-      theme: 'multeam-light',
+      theme: theme === 'dark' ? 'multeam-dark' : 'multeam-light',
       automaticLayout: true,
-      tabSize: 2,
-      fontFamily: "'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace",
-      fontSize: 14,
-      lineHeight: 22,
       padding: { top: 16, bottom: 16 },
       smoothScrolling: true,
       cursorBlinking: 'smooth',
       cursorSmoothCaretAnimation: 'on',
       scrollBeyondLastLine: false,
-      minimap: { enabled: true, scale: 1 },
-      renderLineHighlight: 'all'
+      renderLineHighlight: 'all',
+      ...monacoOptionsFromSettings()
     });
 
     if (!this.collaborative) return this;
@@ -102,6 +120,10 @@ export class CollaborativeWorkspace {
     );
 
     return this;
+  }
+
+  applyEditorSettings(monacoOptions) {
+    if (this.editor) this.editor.updateOptions(monacoOptions);
   }
 
   getAwareness() {

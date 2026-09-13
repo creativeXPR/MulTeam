@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>MulTeam</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="css/style.css" />
+    <!-- Monaco's own stylesheet, extracted by esbuild from its ESM build (see build/bundle.js). -->
+    <link rel="stylesheet" href="js/dist/app.css" />
+  </head>
+  <body>
+    <div class="app">
+      <!-- ============ RAIL ============ -->
+      <aside class="rail">
+        <div class="rail__mark" title="MulTeam">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="19" height="19">
+            <rect x="3" y="3" width="18" height="18" rx="5" /><path d="M9 8v8M15 8v8M9 12h6" />
+          </svg>
+        </div>
+        <div class="rail__rule"></div>
+
+        <nav class="rail__nav" aria-label="Primary">
+          <button class="railbtn is-on" data-nav="dashboard" title="Dashboard">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5" /><path d="M5 10v10h14V10" /><path d="M9.5 20v-6h5v6" /></svg>
+          </button>
+          <button class="railbtn" data-action="search" title="Search (Ctrl K)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" /></svg>
+          </button>
+          <button class="railbtn" data-action="settings" title="Settings">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8" /><circle cx="16" cy="7" r="2.2" /><circle cx="10" cy="17" r="2.2" /></svg>
+          </button>
+          <button class="railbtn" data-action="help" title="Help">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M9.5 9a2.5 2.5 0 0 1 4.9.8c0 1.7-2.4 2-2.4 3.7" /><path d="M12 17.2v.1" /></svg>
+          </button>
+        </nav>
+
+        <div class="rail__spacer"></div>
+
+        <button class="railbtn" id="panelToggleBtn" data-action="panel" title="Hide sidebar" style="margin-bottom:14px">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="4" /><path d="M9 4v16" /></svg>
+        </button>
+
+        <button class="avatarbtn" id="avatarBtn" title="Account" aria-haspopup="true" aria-expanded="false">
+          <span id="avatarInitials">?</span>
+        </button>
+      </aside>
+
+      <!-- ============ PANEL ============ -->
+      <aside class="panel" id="panel">
+        <div class="panel__head">
+          <div class="brand">
+            <span class="brand-mark"></span>
+            <h1>MulTeam</h1>
+          </div>
+          <button class="themebtn" id="themeBtn" title="Switch theme" aria-label="Switch theme"></button>
+        </div>
+
+        <div class="panel__scroll">
+          <div class="navgroup">
+            <button class="navitem is-active" data-nav="dashboard">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5" /><path d="M5 10v10h14V10" /></svg>
+              Dashboard
+            </button>
+
+            <button class="navitem" data-tree="projects" aria-expanded="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="2" /><rect x="13.5" y="3.5" width="7" height="7" rx="2" /><rect x="3.5" y="13.5" width="7" height="7" rx="2" /><rect x="13.5" y="13.5" width="7" height="7" rx="2" /></svg>
+              Projects
+              <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="14" height="14"><path d="m6 9 6 6 6-6" /></svg>
+            </button>
+            <div class="subtree" id="tree-projects"><div id="panel-project-list"></div></div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- ============ MAIN ============ -->
+      <main class="main">
+        <!-- ===== DASHBOARD VIEW ===== -->
+        <section class="view" id="view-dashboard">
+          <header class="topbar">
+            <div class="topbar__title">
+              <h2>Dashboard</h2>
+              <p id="dashboardGreeting">Welcome back</p>
+            </div>
+            <div class="topbar__actions">
+              <button class="ghostbtn iconbtn" data-action="search" title="Search (Ctrl K)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" /></svg>
+              </button>
+              <button class="primarybtn" data-action="newproject">
+                <span class="btn-icon" id="newProjectIcon"></span>
+                New project
+              </button>
+            </div>
+          </header>
+
+          <div class="grid">
+            <!-- workspace -->
+            <div class="card span-4">
+              <div class="card__head"><h3>Workspace</h3></div>
+              <div class="substat">Projects</div>
+              <div class="bigstat" id="wsBigstat">0</div>
+              <div class="substat" id="wsSub">—</div>
+              <div class="tabs" id="wsTabs">
+                <button class="is-on" data-ws="all">All</button>
+                <button data-ws="local">Local</button>
+                <button data-ws="cloud">Cloud</button>
+              </div>
+            </div>
+
+            <!-- live session -->
+            <div class="card span-4 plan" id="liveSessionCard">
+              <div class="plan__top">
+                <div>
+                  <div class="plan__label" id="liveSessionLabel">No live session</div>
+                  <div class="plan__amount" id="liveSessionAmount">—</div>
+                </div>
+                <div class="plan__logo">MulTeam</div>
+              </div>
+              <div class="plan__key" id="liveSessionKey" hidden>
+                <span id="liveSessionId"></span>
+                <button type="button" id="copyProjectIdBtn">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" width="12" height="12"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" /></svg>
+                  Copy ID
+                </button>
+              </div>
+              <p class="plan-empty" id="liveSessionEmpty">Open a cloud project to start collaborating in real time.</p>
+            </div>
+
+            <!-- recent projects -->
+            <div class="card span-4">
+              <div class="card__head"><h3>Recent projects</h3></div>
+              <div id="recentProjects" style="display:flex;flex-direction:column;gap:2px"></div>
+            </div>
+
+            <!-- live collaborators -->
+            <div class="card span-4">
+              <div class="card__head"><h3>Live collaborators</h3></div>
+              <div class="avatars" id="liveAvatars"></div>
+              <div class="substat" id="liveAvatarsEmpty" style="margin-top:10px">Nobody's online with you right now.</div>
+            </div>
+          </div>
+
+          <div class="section-head">
+            <h3>Projects</h3>
+            <span class="muted" id="projCount">0 projects</span>
+          </div>
+          <div class="search-field">
+            <span class="btn-icon" id="searchFieldIcon"></span>
+            <input type="text" id="project-search" placeholder="Search your projects" />
+          </div>
+          <div class="projects" id="projects"></div>
+        </section>
+
+        <!-- ===== EDITOR VIEW ===== -->
+        <section class="view editor-view" id="view-editor" hidden>
+          <div class="editor-toolbar">
+            <div class="file-menu">
+              <button class="icon-text-btn" id="file-menu-btn">
+                File
+                <span class="btn-icon" id="file-menu-chevron"></span>
+              </button>
+              <div class="file-menu-dropdown" id="file-menu-dropdown" hidden>
+                <button type="button" data-action="new-file"><span class="btn-icon" id="menu-icon-new-file"></span>New File</button>
+                <button type="button" data-action="new-folder"><span class="btn-icon" id="menu-icon-new-folder"></span>New Folder</button>
+                <div class="menu-divider"></div>
+                <button type="button" data-action="save"><span class="btn-icon" id="menu-icon-save"></span>Save</button>
+                <button type="button" data-action="save-as"><span class="btn-icon" id="menu-icon-save-as"></span>Save As…</button>
+                <button type="button" data-action="rename"><span class="btn-icon" id="menu-icon-rename"></span>Rename</button>
+                <button type="button" data-action="duplicate"><span class="btn-icon" id="menu-icon-duplicate"></span>Duplicate</button>
+                <div class="menu-divider"></div>
+                <button type="button" data-action="delete" class="danger"><span class="btn-icon" id="menu-icon-delete"></span>Delete</button>
+              </div>
+            </div>
+            <span class="project-name" id="project-name-label"></span>
+          </div>
+
+          <div class="editor-body">
+            <div id="tab-bar" class="tab-bar"></div>
+            <div id="monaco-container"></div>
+          </div>
+
+          <div class="editor-footer">
+            <div id="presence-list" class="presence-list"></div>
+            <div class="file-meta">
+              <span id="line-count">—</span>
+              <span id="char-count">—</span>
+              <span class="status-bar">
+                <span id="status-dot" class="status-dot"></span>
+                <span>Local sync</span>
+              </span>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <!-- ============ OVERLAYS ============ -->
+    <div class="scrim" id="scrim"></div>
+
+    <div class="searchbox" id="searchBox" role="dialog" aria-label="Search">
+      <div class="searchbox__field">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" /></svg>
+        <input id="searchInput" type="text" placeholder="Search projects, files, commands…" autocomplete="off" spellcheck="false" />
+        <span class="kbd">esc</span>
+      </div>
+      <div class="results" id="results"></div>
+      <div class="searchbox__foot">
+        <span><b class="kbd">↑↓</b> move</span>
+        <span><b class="kbd">↵</b> open</span>
+        <span><b class="kbd">ctrl K</b> toggle</span>
+      </div>
+    </div>
+
+    <div class="settings" id="settingsPanel" role="dialog" aria-label="Settings">
+      <div class="settings__head">
+        <div>
+          <h3>Settings</h3>
+          <p>Preferences apply to this machine only.</p>
+        </div>
+        <button class="closebtn" data-close="settings" aria-label="Close settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18" /></svg>
+        </button>
+      </div>
+      <div class="settings__body">
+        <div class="set-group">
+          <h4>Appearance</h4>
+          <div class="set-row">
+            <div class="set-row__txt"><b>Theme</b><span>Switches the whole app</span></div>
+            <div class="set-row__ctl">
+              <div class="seg" id="segTheme">
+                <button data-theme-set="light" class="is-on">Light</button>
+                <button data-theme-set="dark">Dark</button>
+              </div>
+            </div>
+          </div>
+          <div class="set-row">
+            <div class="set-row__txt"><b>Accent</b><span>Used for active states</span></div>
+            <div class="set-row__ctl swatches" id="swatches">
+              <button class="swatch is-on" data-accent="#6D4AFF" style="background:#6D4AFF" aria-label="Violet"></button>
+              <button class="swatch" data-accent="#8B5CF6" style="background:#8B5CF6" aria-label="Purple"></button>
+              <button class="swatch" data-accent="#C026D3" style="background:#C026D3" aria-label="Fuchsia"></button>
+              <button class="swatch" data-accent="#4F46E5" style="background:#4F46E5" aria-label="Indigo"></button>
+            </div>
+          </div>
+        </div>
+
+        <div class="set-group">
+          <h4>Editor</h4>
+          <div class="set-row">
+            <div class="set-row__txt"><b>Font size</b><span id="fsLabel">14 px</span></div>
+            <div class="set-row__ctl"><input type="range" id="fontSize" min="11" max="20" value="14" /></div>
+          </div>
+          <div class="set-row">
+            <div class="set-row__txt"><b>Font family</b><span>Monospace faces only</span></div>
+            <div class="set-row__ctl">
+              <select class="pill" id="fontFamily">
+                <option value='"JetBrains Mono",monospace'>JetBrains Mono</option>
+                <option value='"SF Mono",ui-monospace,monospace'>SF Mono</option>
+                <option value='Consolas,monospace'>Consolas</option>
+                <option value='"Courier New",monospace'>Courier New</option>
+              </select>
+            </div>
+          </div>
+          <div class="set-row">
+            <div class="set-row__txt"><b>Tab size</b><span>Spaces per indent</span></div>
+            <div class="set-row__ctl">
+              <div class="seg" id="segTab">
+                <button data-tab="2" class="is-on">2</button>
+                <button data-tab="4">4</button>
+                <button data-tab="8">8</button>
+              </div>
+            </div>
+          </div>
+          <div class="set-row">
+            <div class="set-row__txt"><b>Ligatures</b><span>Combine -&gt; and != into one glyph</span></div>
+            <div class="set-row__ctl"><button class="toggle is-on" id="toggleLigatures"></button></div>
+          </div>
+          <div class="set-row">
+            <div class="set-row__txt"><b>Minimap</b><span>Overview strip on the right edge</span></div>
+            <div class="set-row__ctl"><button class="toggle is-on" id="toggleMinimap"></button></div>
+          </div>
+          <div class="preview" id="preview"><span class="c3">// preview</span>
+<span class="c1">export function</span> <span class="c4">mergeChanges</span>(name) {
+<span id="ind">  </span><span class="c1">return</span> queue.<span class="c4">push</span>(<span class="c2">`sync:${name}`</span>);
+}</div>
+        </div>
+
+        <div class="set-group">
+          <h4>Keybindings</h4>
+          <div class="set-row">
+            <div class="set-row__txt"><b>Preset</b><span>Changes every shortcut at once</span></div>
+            <div class="set-row__ctl">
+              <select class="pill" id="keymap">
+                <option>MulTeam default</option>
+                <option>VS Code</option>
+                <option>Vim</option>
+                <option>Emacs</option>
+              </select>
+            </div>
+          </div>
+          <div class="set-row">
+            <div class="set-row__txt"><b>Command palette</b><span>Open the search dialog</span></div>
+            <div class="set-row__ctl"><span class="kbd">ctrl K</span></div>
+          </div>
+        </div>
+
+        <div class="set-group">
+          <h4>Workflow</h4>
+          <div class="set-row">
+            <div class="set-row__txt"><b>Autosave</b><span>Save 800 ms after you stop typing</span></div>
+            <div class="set-row__ctl"><button class="toggle is-on" id="toggleAutosave"></button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="profile" id="profileMenu" role="menu">
+      <div class="profile__id">
+        <div class="profile__av" id="profileAvatar">?</div>
+        <div>
+          <b id="profileName">Not signed in</b>
+          <span id="profileEmail">Sign in for cloud sync</span>
+        </div>
+      </div>
+      <hr />
+      <button class="menuitem" role="menuitem" data-action="settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8" /><circle cx="16" cy="7" r="2.2" /><circle cx="10" cy="17" r="2.2" /></svg>
+        Settings
+        <span class="kbd">,</span>
+      </button>
+      <button class="menuitem" role="menuitem" id="profileSigninBtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /><path d="m10 17 5-5-5-5M15 12H3" /></svg>
+        Sign in
+      </button>
+      <button class="menuitem danger" role="menuitem" id="profileSignoutBtn" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3" /><path d="M10 8 6 12l4 4M6 12h9" /></svg>
+        Sign out
+      </button>
+    </div>
+
+    <div class="toasts" id="toasts"></div>
+
+    <!-- ============ MODALS ============ -->
+    <div class="modal-overlay" id="project-modal" hidden>
+      <form class="modal-card" id="project-form">
+        <h2 id="project-modal-title">New project</h2>
+        <div class="field">
+          <label for="project-name">Project name</label>
+          <input id="project-name" type="text" required autofocus />
+        </div>
+        <div class="field">
+          <label>Folder</label>
+          <button type="button" class="secondary" id="project-folder-btn">Choose folder…</button>
+          <p class="folder-path" id="project-folder-path"></p>
+        </div>
+        <label class="toggle-field">
+          <input type="checkbox" id="project-cloud-toggle" />
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+          <span class="toggle-label">Enable cloud sync</span>
+        </label>
+        <p class="field-hint">Lets you share this project and collaborate with others in real time (live mode). Requires an account.</p>
+        <p class="error-text" id="project-error"></p>
+        <div class="modal-actions">
+          <button type="button" class="secondary" id="project-cancel">Cancel</button>
+          <button type="submit" class="primary" id="project-submit">Create</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="modal-overlay" id="delete-modal" hidden>
+      <div class="modal-card">
+        <h2>Delete project</h2>
+        <p class="modal-sub" id="delete-modal-sub">This only removes it from MulTeam — your files stay on disk.</p>
+        <div class="delete-choices" id="delete-choices" hidden>
+          <label class="radio-field"><input type="radio" name="delete-scope" value="local" checked /> Remove locally only <span class="field-hint">Stays in the cloud — reachable again once you're online.</span></label>
+          <label class="radio-field"><input type="radio" name="delete-scope" value="cloud" /> Remove from cloud only <span class="field-hint">Keeps your local files and folder.</span></label>
+          <label class="radio-field"><input type="radio" name="delete-scope" value="both" /> Remove both</label>
+        </div>
+        <p class="error-text" id="delete-error"></p>
+        <div class="modal-actions">
+          <button type="button" class="secondary" id="delete-cancel">Cancel</button>
+          <button type="button" class="primary danger" id="delete-confirm">Delete</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="rename-modal" hidden>
+      <form class="modal-card" id="rename-form">
+        <h2>Rename</h2>
+        <div class="field">
+          <label for="rename-input">New name</label>
+          <input id="rename-input" type="text" required autofocus />
+        </div>
+        <p class="error-text" id="rename-error"></p>
+        <div class="modal-actions">
+          <button type="button" class="secondary" id="rename-cancel">Cancel</button>
+          <button type="submit" class="primary">Rename</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="modal-overlay" id="help-modal" hidden>
+      <div class="modal-card help-card">
+        <h2>Help</h2>
+        <p class="modal-sub">MulTeam is a local-first code editor with optional real-time collaboration.</p>
+
+        <h4 class="help-heading">How to</h4>
+        <ul class="help-list">
+          <li><b>New project</b> — pick a name and a folder. Nothing touches the cloud unless you turn on cloud sync.</li>
+          <li><b>Cloud sync</b> — turn it on (per-project) to collaborate live with others; you'll be asked to sign in the first time.</li>
+          <li><b>Ctrl+K</b> — jump to any project, open file, or app command.</li>
+          <li><b>Right-click a file</b> — rename, duplicate, save as, or delete it.</li>
+          <li><b>Switching projects</b> — only one project stays open at a time; you'll be asked to confirm before switching away from one with unsaved work.</li>
+        </ul>
+
+        <div class="modal-actions">
+          <button type="button" class="secondary" id="help-close">Close</button>
+        </div>
+        <p class="help-version">MulTeam v1.0 alpha</p>
+      </div>
+    </div>
+
+    <!-- Floating right-click context menu for file-tree entries -->
+    <div class="context-menu" id="context-menu" hidden></div>
+
+    <script type="module" src="js/dist/app.js"></script>
+  </body>
+</html>

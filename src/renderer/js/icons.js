@@ -45,12 +45,6 @@ export function plusIconSvg() {
   </svg>`;
 }
 
-export function logoutIconSvg() {
-  return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path d="M15 17l5-5-5-5M20 12H9M12 19H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-  </svg>`;
-}
-
 export function newFileIconSvg() {
   return `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
     <path d="M6 2h8l6 6v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
@@ -101,12 +95,6 @@ export function copyIconSvg() {
   </svg>`;
 }
 
-export function cloudIconSvg() {
-  return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path d="M7 18a4.5 4.5 0 0 1-.5-8.98A5.5 5.5 0 0 1 17.3 8.06 4 4 0 0 1 17 16H7Z" fill="#6b4ef0" stroke="#6b4ef0" stroke-width="1.3" stroke-linejoin="round"/>
-  </svg>`;
-}
-
 export function editIconSvg() {
   return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
     <path d="M12 20h9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
@@ -118,12 +106,6 @@ export function searchIconSvg() {
   return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
     <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/>
     <path d="M21 21l-4.3-4.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-  </svg>`;
-}
-
-export function backArrowIconSvg() {
-  return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path d="M19 12H5M11 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>`;
 }
 

@@ -1,8 +1,9 @@
-// Bundles the renderer's ES module entry points (which pull in yjs, y-monaco,
+// Bundles the renderer's ES module entry point (which pulls in yjs, y-monaco,
 // monaco-editor, and the Firebase SDK — all packages with internal bare
 // imports that only resolve through a bundler) into plain browser-loadable
-// ESM. Output basenames match the entryPoints keys below (app.js, login.js,
-// dashboard.js) — the HTML pages under src/renderer/ load those exact names.
+// ESM. app.html is the only page in the app — dashboard, editor and auth are
+// all views inside its one persistent shell (shell.js) rather than separate
+// page loads.
 const esbuild = require('esbuild');
 const path = require('node:path');
 
@@ -11,9 +12,7 @@ const preloadDir = path.join(__dirname, '..', 'src', 'preload');
 
 esbuild.buildSync({
   entryPoints: {
-    app: path.join(rendererJs, 'app.js'),
-    login: path.join(rendererJs, 'login.js'),
-    dashboard: path.join(rendererJs, 'dashboard.js')
+    app: path.join(rendererJs, 'shell.js')
   },
   bundle: true,
   format: 'esm',

@@ -1,8 +1,8 @@
-// A login form rendered as a modal overlay, injected into whichever page
-// needs it on first use. This exists so a cloud action (toggling a project
-// to cloud sync, etc.) can ask for sign-in without a full page navigation to
-// login.html — a navigation would lose in-progress modal state (typed
-// project name, chosen folder, toggle position).
+// A login form rendered as a modal overlay, injected into the page on first
+// use. This exists so a cloud action (toggling a project to cloud sync,
+// etc.) can ask for sign-in without switching to the dedicated auth view —
+// that switch would lose in-progress modal state (typed project name,
+// chosen folder, toggle position) that this overlay preserves instead.
 import { auth, signIn, signUp, signInWithGoogle } from './firebase.js';
 
 let modalEl = null;
@@ -30,10 +30,7 @@ function build() {
         <input id="auth-modal-password" type="password" autocomplete="current-password" required minlength="6" />
       </div>
       <p class="error-text" id="auth-modal-error"></p>
-      <div class="modal-actions">
-        <button type="button" class="secondary" id="auth-modal-cancel">Cancel</button>
-        <button type="submit" class="primary" id="auth-modal-submit">Sign in</button>
-      </div>
+      <button type="submit" class="primary" id="auth-modal-submit">Sign in</button>
       <button type="button" class="secondary" id="auth-modal-google">Continue with Google</button>
       <button type="button" class="secondary" id="auth-modal-toggle">Don't have an account? Sign up</button>
     </form>
@@ -64,9 +61,11 @@ function wire(el) {
   const errorEl = el.querySelector('#auth-modal-error');
   const submitBtn = el.querySelector('#auth-modal-submit');
 
-  el.querySelector('#auth-modal-cancel').addEventListener('click', () => close(el));
   el.addEventListener('click', (e) => {
     if (e.target === el) close(el);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !el.hidden) close(el);
   });
 
   el.querySelector('#auth-modal-toggle').addEventListener('click', () => {
@@ -123,4 +122,11 @@ export function requireAuth(callback) {
   onSuccess = callback;
   el.hidden = false;
   el.querySelector('#auth-modal-email').focus();
+}
+
+// For an explicit "Sign in" action with no pending task to resume — e.g.
+// the profile menu's Sign in item, or the command palette. Same overlay,
+// just no callback to chain afterward.
+export function openSignIn() {
+  requireAuth(() => {});
 }

@@ -24,7 +24,7 @@ function startRendererServer(rootDir) {
   return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
       const urlPath = decodeURIComponent(req.url.split('?')[0]);
-      const relativePath = urlPath === '/' ? 'login.html' : urlPath.replace(/^\/+/, '');
+      const relativePath = urlPath === '/' ? 'app.html' : urlPath.replace(/^\/+/, '');
       const filePath = path.normalize(path.join(rootDir, relativePath));
 
       if (!filePath.startsWith(rootDir)) {
