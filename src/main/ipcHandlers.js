@@ -1,13 +1,35 @@
-const { app } = require('electron');
+const { app, BrowserWindow } = require('electron');
 const { IPC } = require('../shared/constants');
 const { setupFileSystemHandlers } = require('./filesystem');
 const { setupProjectHandlers } = require('./projects');
+const { setupTerminalHandlers } = require('./terminal');
+const { setupSearchHandlers } = require('./search');
+const { setupGitHandlers } = require('./git');
+const { setupExtensionHandlers } = require('./extensions');
+const { titleBarOverlayFor, zoom } = require('./window');
 
 function registerIpcHandlers(ipcMain) {
   ipcMain.handle(IPC.GET_APP_VERSION, () => app.getVersion());
 
+  // Re-tints the native window controls (min/max/close) drawn over the
+  // custom title bar so they follow the app's light/dark theme.
+  ipcMain.handle(IPC.SET_TITLEBAR_THEME, (event, theme) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || process.platform === 'darwin') return;
+    win.setTitleBarOverlay(titleBarOverlayFor(theme, win.webContents.getZoomFactor()));
+  });
+
+  ipcMain.handle(IPC.WINDOW_ZOOM, (event, action) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win && ['in', 'out', 'reset'].includes(action)) zoom(win, action);
+  });
+
   setupFileSystemHandlers(ipcMain);
   setupProjectHandlers(ipcMain, IPC);
+  setupTerminalHandlers(ipcMain, IPC);
+  setupSearchHandlers(ipcMain, IPC);
+  setupGitHandlers(ipcMain, IPC);
+  setupExtensionHandlers(ipcMain, IPC);
 }
 
 module.exports = { registerIpcHandlers };

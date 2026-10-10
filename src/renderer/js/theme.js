@@ -1,15 +1,23 @@
-// Theme + accent color. Ported from the Stores/multeam-dashboard.html
-// reference — light is the default (:root in style.css needs no attribute),
-// dark is opt-in via [data-theme="dark"].
+// Theme + accent color. Light is the default (:root in style.css needs no
+// attribute), dark is opt-in via [data-theme="dark"]. The accent rewrites
+// the --violet-* vars, which the minimalist design uses only for actions,
+// selection and active states.
 const THEME_KEY = 'multeam:theme';
 const ACCENT_KEY = 'multeam:accent';
 
 export function getTheme() {
-  return localStorage.getItem(THEME_KEY) || 'light';
+  return localStorage.getItem(THEME_KEY) || window.electronAPI?.savedTheme || 'light';
+}
+
+// The navbar is the window title bar; the OS-drawn min/max/close controls
+// over it are re-tinted by the main process to match.
+function syncTitleBar(theme) {
+  window.electronAPI?.setTitleBarTheme?.(theme);
 }
 
 export function setTheme(theme) {
   document.documentElement.dataset.theme = theme;
+  syncTitleBar(theme);
   localStorage.setItem(THEME_KEY, theme);
   document.dispatchEvent(new CustomEvent('multeam:themechange', { detail: { theme } }));
 }
@@ -41,6 +49,7 @@ export function setAccent(hex) {
 // that depends on theme colors is meaningfully visible.
 export function applyStoredTheme() {
   document.documentElement.dataset.theme = getTheme();
+  syncTitleBar(getTheme());
   const accent = localStorage.getItem(ACCENT_KEY);
   if (accent) setAccent(accent);
 }

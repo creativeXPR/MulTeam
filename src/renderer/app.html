@@ -3,197 +3,282 @@
   <head>
     <meta charset="UTF-8" />
     <title>MulTeam</title>
+    <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="css/style.css" />
     <!-- Monaco's own stylesheet, extracted by esbuild from its ESM build (see build/bundle.js). -->
     <link rel="stylesheet" href="js/dist/app.css" />
   </head>
   <body>
-    <div class="app">
-      <!-- ============ RAIL ============ -->
-      <aside class="rail">
-        <div class="rail__mark" title="MulTeam">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="19" height="19">
-            <rect x="3" y="3" width="18" height="18" rx="5" /><path d="M9 8v8M15 8v8M9 12h6" />
-          </svg>
-        </div>
-        <div class="rail__rule"></div>
+    <!-- Layout follows test/mnldsg-multeam.html: navbar (3 boxes) / sidebar
+         (sidearray + sidelist) + body / footerbar (2 boxes). -->
 
-        <nav class="rail__nav" aria-label="Primary">
-          <button class="railbtn is-on" data-nav="dashboard" title="Dashboard">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5" /><path d="M5 10v10h14V10" /><path d="M9.5 20v-6h5v6" /></svg>
-          </button>
-          <button class="railbtn" data-action="search" title="Search (Ctrl K)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" /></svg>
-          </button>
-          <button class="railbtn" data-action="settings" title="Settings">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8" /><circle cx="16" cy="7" r="2.2" /><circle cx="10" cy="17" r="2.2" /></svg>
-          </button>
-          <button class="railbtn" data-action="help" title="Help">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M9.5 9a2.5 2.5 0 0 1 4.9.8c0 1.7-2.4 2-2.4 3.7" /><path d="M12 17.2v.1" /></svg>
-          </button>
-        </nav>
+    <!-- ============ NAVBAR ============ -->
+    <nav class="navbar">
+      <div class="box mini subtle">
+        <span class="brand" title="MulTeam"><img class="brand-mark" src="assets/logo.svg" alt="" />MulTeam</span>
 
-        <div class="rail__spacer"></div>
+        <nav class="menubar" id="menubar" aria-label="Application menu"></nav>
+      </div>
 
-        <button class="railbtn" id="panelToggleBtn" data-action="panel" title="Hide sidebar" style="margin-bottom:14px">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="4" /><path d="M9 4v16" /></svg>
+      <button class="box mini cmdcenter" data-action="search" title="Search (Ctrl K)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" /></svg>
+        <span class="cmdcenter__label" id="project-name-label"></span>
+        <span class="kbd">ctrl K</span>
+      </button>
+
+      <div class="box mini subtle">
+        <button class="ibtn" id="themeBtn" title="Switch theme" aria-label="Switch theme">
+          <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>
+          <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5Z" /></svg>
         </button>
-
+        <button class="ibtn" data-action="settings" title="Settings (Ctrl ,)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8" /><circle cx="16" cy="7" r="2.2" /><circle cx="10" cy="17" r="2.2" /></svg>
+        </button>
         <button class="avatarbtn" id="avatarBtn" title="Account" aria-haspopup="true" aria-expanded="false">
           <span id="avatarInitials">?</span>
         </button>
-      </aside>
+      </div>
+    </nav>
 
-      <!-- ============ PANEL ============ -->
-      <aside class="panel" id="panel">
-        <div class="panel__head">
-          <div class="brand">
-            <span class="brand-mark"></span>
-            <h1>MulTeam</h1>
-          </div>
-          <button class="themebtn" id="themeBtn" title="Switch theme" aria-label="Switch theme"></button>
-        </div>
-
-        <div class="panel__scroll">
-          <div class="navgroup">
-            <button class="navitem is-active" data-nav="dashboard">
+    <!-- ============ MAIN ============ -->
+    <div class="main">
+      <aside class="sidebar" id="sidebar">
+        <div class="box">
+          <!-- sidearray: icon strip -->
+          <nav class="sidearray" aria-label="Primary">
+            <button class="ibtn is-on" data-nav="dashboard" title="Dashboard">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5" /><path d="M5 10v10h14V10" /></svg>
-              Dashboard
             </button>
+            <button class="ibtn" data-nav="editor" title="Editor">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14" /></svg>
+            </button>
+            <button class="ibtn" data-side="search" title="Search in files (Ctrl Shift F)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" /></svg>
+            </button>
+            <button class="ibtn" data-side="scm" title="Source Control (Ctrl Shift G)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2.2" /><circle cx="6" cy="19" r="2.2" /><circle cx="18" cy="8" r="2.2" /><path d="M6 7.2v9.6M18 10.2c0 4-6 3-11 6.6" /></svg>
+              <span class="ibtn__badge" id="scmBadge" hidden></span>
+            </button>
+            <button class="ibtn" data-side="ext" title="Extensions (Ctrl Shift X)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"><rect x="3.5" y="3.5" width="7" height="7" rx="2" /><rect x="13.5" y="3.5" width="7" height="7" rx="2" /><rect x="3.5" y="13.5" width="7" height="7" rx="2" /><path d="M17 13.5v7M13.5 17h7" /></svg>
+            </button>
+            <button class="ibtn" data-action="help" title="Help">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M9.5 9a2.5 2.5 0 0 1 4.9.8c0 1.7-2.4 2-2.4 3.7" /><path d="M12 17.2v.1" /></svg>
+            </button>
+            <span class="sidearray__spacer"></span>
+            <button class="ibtn" id="panelToggleBtn" data-action="panel" title="Toggle sidebar">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="4" /><path d="M9 4v16" /></svg>
+            </button>
+          </nav>
 
-            <button class="navitem" data-tree="projects" aria-expanded="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="2" /><rect x="13.5" y="3.5" width="7" height="7" rx="2" /><rect x="3.5" y="13.5" width="7" height="7" rx="2" /><rect x="13.5" y="13.5" width="7" height="7" rx="2" /></svg>
-              Projects
-              <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="14" height="14"><path d="m6 9 6 6 6-6" /></svg>
-            </button>
-            <div class="subtree" id="tree-projects"><div id="panel-project-list"></div></div>
+          <!-- sidelist: projects + file tree of the open project -->
+          <div class="sidelist">
+            <div class="sidepane" data-sidepane="explorer">
+              <div class="sidelist__headrow">
+                <button class="sidelist__head" data-tree="projects" aria-expanded="true">
+                  <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="12" height="12"><path d="m6 9 6 6 6-6" /></svg>
+                  Projects
+                </button>
+                <span class="explorer__acts" id="explorerActs" hidden>
+                  <button type="button" class="ibtn" data-explorer="new-file" title="New File">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z" /><path d="M13 3v6h6M12 12v6M9 15h6" /></svg>
+                  </button>
+                  <button type="button" class="ibtn" data-explorer="new-folder" title="New Folder">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M12 10.5v5M9.5 13h5" /></svg>
+                  </button>
+                  <button type="button" class="ibtn" data-explorer="refresh" title="Refresh Explorer">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 5v6h-6" /></svg>
+                  </button>
+                  <button type="button" class="ibtn" data-explorer="collapse" title="Collapse Folders">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3" /><path d="M8.5 12h7" /></svg>
+                  </button>
+                </span>
+              </div>
+              <div class="subtree" id="tree-projects"><div id="panel-project-list"></div></div>
+            </div>
+
+            <!-- find in files (Ctrl+Shift+F) -->
+            <div class="sidepane" data-sidepane="search" hidden>
+              <div class="sidelist__head static">Search</div>
+              <div class="fsearch">
+                <div class="fsearch__field">
+                  <input type="text" id="fsearchInput" placeholder="Search in project" spellcheck="false" autocomplete="off" />
+                  <button type="button" class="fsearch__opt" data-fopt="caseSensitive" title="Match case">Aa</button>
+                  <button type="button" class="fsearch__opt" data-fopt="wholeWord" title="Match whole word"><u>ab</u></button>
+                  <button type="button" class="fsearch__opt" data-fopt="regex" title="Use regular expression">.*</button>
+                </div>
+                <div class="fsearch__summary" id="fsearchSummary"></div>
+              </div>
+              <div class="fsearch__results" id="fsearchResults"></div>
+            </div>
+
+            <!-- source control (Ctrl+Shift+G) -->
+            <div class="sidepane" data-sidepane="scm" hidden>
+              <div class="sidelist__head static scm__head">
+                Source Control
+                <span class="scm__headacts">
+                  <button type="button" class="ibtn" id="scmPull" title="Pull">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v13M6 11l6 6 6-6M5 20h14" /></svg>
+                  </button>
+                  <button type="button" class="ibtn" id="scmPush" title="Push">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V7M6 13l6-6 6 6M5 4h14" /></svg>
+                  </button>
+                  <button type="button" class="ibtn" id="scmRefresh" title="Refresh">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 5v6h-6" /></svg>
+                  </button>
+                </span>
+              </div>
+              <div class="scm__body" id="scmBody"></div>
+            </div>
+
+            <!-- extensions (Ctrl+Shift+X) -->
+            <div class="sidepane" data-sidepane="ext" hidden>
+              <div class="sidelist__head static">Extensions</div>
+              <div class="fsearch">
+                <div class="fsearch__field">
+                  <input type="text" id="extSearch" placeholder="Search Open VSX" spellcheck="false" autocomplete="off" />
+                </div>
+                <div class="seg ext__filter" id="extFilter">
+                  <button type="button" data-cat="Themes" class="is-on">Themes</button>
+                  <button type="button" data-cat="Snippets">Snippets</button>
+                  <button type="button" data-cat="All">All</button>
+                </div>
+              </div>
+              <div class="ext__list" id="extList"></div>
+            </div>
           </div>
         </div>
       </aside>
+      <div class="sash" id="sidebarSash" title="Drag to resize · double-click to reset" role="separator" aria-orientation="vertical"></div>
 
-      <!-- ============ MAIN ============ -->
-      <main class="main">
-        <!-- ===== DASHBOARD VIEW ===== -->
-        <section class="view" id="view-dashboard">
-          <header class="topbar">
-            <div class="topbar__title">
-              <h2>Dashboard</h2>
-              <p id="dashboardGreeting">Welcome back</p>
-            </div>
-            <div class="topbar__actions">
-              <button class="ghostbtn iconbtn" data-action="search" title="Search (Ctrl K)">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" /></svg>
-              </button>
-              <button class="primarybtn" data-action="newproject">
-                <span class="btn-icon" id="newProjectIcon"></span>
+      <section class="body">
+        <div class="box">
+          <!-- ===== DASHBOARD VIEW ===== -->
+          <section class="view scroll" id="view-dashboard">
+            <header class="vhead">
+              <div>
+                <h2>Dashboard</h2>
+                <p id="dashboardGreeting">Welcome back</p>
+              </div>
+              <button class="pillbtn is-primary" data-action="newproject">
+                <span class="btn-icon" id="newProjectIconMain"></span>
                 New project
               </button>
-            </div>
-          </header>
+            </header>
 
-          <div class="grid">
-            <!-- workspace -->
-            <div class="card span-4">
-              <div class="card__head"><h3>Workspace</h3></div>
-              <div class="substat">Projects</div>
-              <div class="bigstat" id="wsBigstat">0</div>
-              <div class="substat" id="wsSub">—</div>
-              <div class="tabs" id="wsTabs">
-                <button class="is-on" data-ws="all">All</button>
-                <button data-ws="local">Local</button>
-                <button data-ws="cloud">Cloud</button>
-              </div>
-            </div>
-
-            <!-- live session -->
-            <div class="card span-4 plan" id="liveSessionCard">
-              <div class="plan__top">
-                <div>
-                  <div class="plan__label" id="liveSessionLabel">No live session</div>
-                  <div class="plan__amount" id="liveSessionAmount">—</div>
+            <div class="stats">
+              <div class="stat">
+                <div class="stat__label">Workspace</div>
+                <div class="bigstat" id="wsBigstat">0</div>
+                <div class="substat" id="wsSub">—</div>
+                <div class="seg" id="wsTabs">
+                  <button class="is-on" data-ws="all">All</button>
+                  <button data-ws="local">Local</button>
+                  <button data-ws="cloud">Cloud</button>
                 </div>
-                <div class="plan__logo">MulTeam</div>
               </div>
-              <div class="plan__key" id="liveSessionKey" hidden>
-                <span id="liveSessionId"></span>
-                <button type="button" id="copyProjectIdBtn">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" width="12" height="12"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" /></svg>
-                  Copy ID
-                </button>
+
+              <div class="stat">
+                <div class="stat__label" id="liveSessionLabel">No live session</div>
+                <div class="bigstat sm" id="liveSessionAmount">—</div>
+                <div class="livekey" id="liveSessionKey" hidden>
+                  <span id="liveSessionId"></span>
+                  <button type="button" class="chipbtn" id="copyProjectIdBtn">Copy ID</button>
+                </div>
+                <p class="substat" id="liveSessionEmpty">Open a cloud project to collaborate in real time.</p>
               </div>
-              <p class="plan-empty" id="liveSessionEmpty">Open a cloud project to start collaborating in real time.</p>
-            </div>
 
-            <!-- recent projects -->
-            <div class="card span-4">
-              <div class="card__head"><h3>Recent projects</h3></div>
-              <div id="recentProjects" style="display:flex;flex-direction:column;gap:2px"></div>
-            </div>
+              <div class="stat">
+                <div class="stat__label">Recent</div>
+                <div id="recentProjects" class="stack"></div>
+              </div>
 
-            <!-- live collaborators -->
-            <div class="card span-4">
-              <div class="card__head"><h3>Live collaborators</h3></div>
-              <div class="avatars" id="liveAvatars"></div>
-              <div class="substat" id="liveAvatarsEmpty" style="margin-top:10px">Nobody's online with you right now.</div>
-            </div>
-          </div>
-
-          <div class="section-head">
-            <h3>Projects</h3>
-            <span class="muted" id="projCount">0 projects</span>
-          </div>
-          <div class="search-field">
-            <span class="btn-icon" id="searchFieldIcon"></span>
-            <input type="text" id="project-search" placeholder="Search your projects" />
-          </div>
-          <div class="projects" id="projects"></div>
-        </section>
-
-        <!-- ===== EDITOR VIEW ===== -->
-        <section class="view editor-view" id="view-editor" hidden>
-          <div class="editor-toolbar">
-            <div class="file-menu">
-              <button class="icon-text-btn" id="file-menu-btn">
-                File
-                <span class="btn-icon" id="file-menu-chevron"></span>
-              </button>
-              <div class="file-menu-dropdown" id="file-menu-dropdown" hidden>
-                <button type="button" data-action="new-file"><span class="btn-icon" id="menu-icon-new-file"></span>New File</button>
-                <button type="button" data-action="new-folder"><span class="btn-icon" id="menu-icon-new-folder"></span>New Folder</button>
-                <div class="menu-divider"></div>
-                <button type="button" data-action="save"><span class="btn-icon" id="menu-icon-save"></span>Save</button>
-                <button type="button" data-action="save-as"><span class="btn-icon" id="menu-icon-save-as"></span>Save As…</button>
-                <button type="button" data-action="rename"><span class="btn-icon" id="menu-icon-rename"></span>Rename</button>
-                <button type="button" data-action="duplicate"><span class="btn-icon" id="menu-icon-duplicate"></span>Duplicate</button>
-                <div class="menu-divider"></div>
-                <button type="button" data-action="delete" class="danger"><span class="btn-icon" id="menu-icon-delete"></span>Delete</button>
+              <div class="stat">
+                <div class="stat__label">Live collaborators</div>
+                <div class="avatars" id="liveAvatars"></div>
+                <div class="substat" id="liveAvatarsEmpty">Nobody's online with you right now.</div>
               </div>
             </div>
-            <span class="project-name" id="project-name-label"></span>
-          </div>
 
-          <div class="editor-body">
+            <div class="section-head">
+              <h3>Projects</h3>
+              <span class="muted" id="projCount">0 projects</span>
+              <label class="search-field">
+                <span class="btn-icon" id="searchFieldIcon"></span>
+                <input type="text" id="project-search" placeholder="Search projects" />
+              </label>
+            </div>
+            <div class="projects" id="projects"></div>
+          </section>
+
+          <!-- ===== EDITOR VIEW ===== -->
+          <section class="view editor-view" id="view-editor" hidden>
             <div id="tab-bar" class="tab-bar"></div>
-            <div id="monaco-container"></div>
-          </div>
+            <div id="monaco-container" data-empty="Open a project from the sidebar"></div>
 
-          <div class="editor-footer">
-            <div id="presence-list" class="presence-list"></div>
-            <div class="file-meta">
-              <span id="line-count">—</span>
-              <span id="char-count">—</span>
-              <span class="status-bar">
-                <span id="status-dot" class="status-dot"></span>
-                <span>Local sync</span>
-              </span>
+            <!-- bottom panel (Ctrl+J) -->
+            <div class="bpanel" id="bottomPanel" hidden>
+              <div class="bpanel__resize" id="bpanelResize" title="Drag to resize"></div>
+              <div class="bpanel__head">
+                <div class="bpanel__tabs" id="bpanelTabs">
+                  <button type="button" data-ptab="problems">Problems <span class="bpanel__count" id="problemsTabCount" hidden>0</span></button>
+                  <button type="button" data-ptab="terminal">Terminal</button>
+                </div>
+                <div class="bpanel__actions">
+                  <div class="bpanel__actions" data-pfor="terminal">
+                    <select class="pill sm" id="termShell" title="Shell for new terminals"></select>
+                    <button type="button" class="ibtn" id="termNew" title="New terminal" aria-label="New terminal">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
+                    </button>
+                    <button type="button" class="ibtn danger" id="termKill" title="Kill terminal" aria-label="Kill terminal">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" /></svg>
+                    </button>
+                  </div>
+                  <button type="button" class="ibtn" id="bpanelClose" title="Close panel (Ctrl J)" aria-label="Close panel">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18" /></svg>
+                  </button>
+                </div>
+              </div>
+              <div class="bpanel__body scroll" data-ppane="problems" id="problemsList"></div>
+              <div class="bpanel__body term" data-ppane="terminal">
+                <div class="term__host" id="termHost"></div>
+                <div class="term__list scroll" id="termList" hidden></div>
+              </div>
             </div>
-          </div>
-        </section>
-      </main>
+          </section>
+        </div>
+      </section>
     </div>
+
+    <!-- ============ FOOTERBAR ============ -->
+    <footer class="footerbar">
+      <div class="box mini subtle">
+        <button type="button" class="footbtn" id="branchBtn" hidden>
+          <svg class="footbtn__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2.2" /><circle cx="6" cy="19" r="2.2" /><circle cx="18" cy="8" r="2.2" /><path d="M6 7.2v9.6M18 10.2c0 4-6 3-11 6.6" /></svg>
+          <span id="branchName"></span><span id="branchSync" class="branch-sync"></span>
+        </button>
+        <span class="status-bar">
+          <span id="status-dot" class="status-dot"></span>
+          <span id="status-text">Local sync</span>
+        </span>
+        <button type="button" class="footbtn" id="problemsBtn" title="Problems (Ctrl J)">
+          <span class="btn-icon" id="errIcon"></span><span id="errCount">0</span>
+          <span class="btn-icon" id="warnIcon"></span><span id="warnCount">0</span>
+        </button>
+        <div id="presence-list" class="presence-list"></div>
+      </div>
+      <div class="box mini subtle">
+        <span id="line-count">—</span>
+        <span id="char-count">—</span>
+        <button class="ibtn notifbtn" id="notifBtn" title="Notifications" aria-haspopup="true" aria-expanded="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15Z" /><path d="M10 20.5a2 2 0 0 0 4 0" /></svg>
+          <span class="notifbtn__dot" id="notifDot" hidden></span>
+        </button>
+      </div>
+    </footer>
 
     <!-- ============ OVERLAYS ============ -->
     <div class="scrim" id="scrim"></div>
@@ -204,7 +289,7 @@
         <input id="searchInput" type="text" placeholder="Search projects, files, commands…" autocomplete="off" spellcheck="false" />
         <span class="kbd">esc</span>
       </div>
-      <div class="results" id="results"></div>
+      <div class="results scroll" id="results"></div>
       <div class="searchbox__foot">
         <span><b class="kbd">↑↓</b> move</span>
         <span><b class="kbd">↵</b> open</span>
@@ -218,11 +303,11 @@
           <h3>Settings</h3>
           <p>Preferences apply to this machine only.</p>
         </div>
-        <button class="closebtn" data-close="settings" aria-label="Close settings">
+        <button class="ibtn" data-close="settings" aria-label="Close settings">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18" /></svg>
         </button>
       </div>
-      <div class="settings__body">
+      <div class="settings__body scroll">
         <div class="set-group">
           <h4>Appearance</h4>
           <div class="set-row">
@@ -235,7 +320,11 @@
             </div>
           </div>
           <div class="set-row">
-            <div class="set-row__txt"><b>Accent</b><span>Used for active states</span></div>
+            <div class="set-row__txt"><b>Editor theme</b><span>Install more from Extensions</span></div>
+            <div class="set-row__ctl"><select class="pill" id="editorTheme"><option value="">MulTeam (follows app theme)</option></select></div>
+          </div>
+          <div class="set-row">
+            <div class="set-row__txt"><b>Accent</b><span>Used for actions and active states</span></div>
             <div class="set-row__ctl swatches" id="swatches">
               <button class="swatch is-on" data-accent="#6D4AFF" style="background:#6D4AFF" aria-label="Violet"></button>
               <button class="swatch" data-accent="#8B5CF6" style="background:#8B5CF6" aria-label="Purple"></button>
@@ -327,7 +416,7 @@
       <button class="menuitem" role="menuitem" data-action="settings">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8" /><circle cx="16" cy="7" r="2.2" /><circle cx="10" cy="17" r="2.2" /></svg>
         Settings
-        <span class="kbd">,</span>
+        <span class="kbd">ctrl ,</span>
       </button>
       <button class="menuitem" role="menuitem" id="profileSigninBtn">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /><path d="m10 17 5-5-5-5M15 12H3" /></svg>
@@ -337,6 +426,11 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3" /><path d="M10 8 6 12l4 4M6 12h9" /></svg>
         Sign out
       </button>
+    </div>
+
+    <div class="notifs" id="notifPanel" role="dialog" aria-label="Notifications">
+      <div class="notifs__head">Notifications</div>
+      <div class="notifs__list scroll" id="notifList"></div>
     </div>
 
     <div class="toasts" id="toasts"></div>
@@ -371,12 +465,20 @@
     <div class="modal-overlay" id="delete-modal" hidden>
       <div class="modal-card">
         <h2>Delete project</h2>
-        <p class="modal-sub" id="delete-modal-sub">This only removes it from MulTeam — your files stay on disk.</p>
+        <p class="modal-sub" id="delete-modal-sub">Removes it from MulTeam. Your files stay on disk unless you choose otherwise below.</p>
         <div class="delete-choices" id="delete-choices" hidden>
           <label class="radio-field"><input type="radio" name="delete-scope" value="local" checked /> Remove locally only <span class="field-hint">Stays in the cloud — reachable again once you're online.</span></label>
           <label class="radio-field"><input type="radio" name="delete-scope" value="cloud" /> Remove from cloud only <span class="field-hint">Keeps your local files and folder.</span></label>
           <label class="radio-field"><input type="radio" name="delete-scope" value="both" /> Remove both</label>
         </div>
+        <label class="check-field" id="delete-folder-field">
+          <input type="checkbox" id="delete-folder-toggle" />
+          <span>
+            Also delete the project folder
+            <span class="field-hint" id="delete-folder-path"></span>
+            <span class="field-hint">Moves the folder and everything in it to the Recycle Bin.</span>
+          </span>
+        </label>
         <p class="error-text" id="delete-error"></p>
         <div class="modal-actions">
           <button type="button" class="secondary" id="delete-cancel">Cancel</button>
@@ -400,6 +502,33 @@
       </form>
     </div>
 
+    <!-- Generic text-input dialog (e.g. new branch name) -->
+    <div class="modal-overlay" id="prompt-modal" hidden>
+      <form class="modal-card" id="prompt-form">
+        <h2 id="prompt-title">Enter a value</h2>
+        <div class="field">
+          <label for="prompt-input" id="prompt-label">Name</label>
+          <input id="prompt-input" type="text" required autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="secondary" id="prompt-cancel">Cancel</button>
+          <button type="submit" class="primary" id="prompt-ok">OK</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Generic "are you sure?" dialog — used instead of window.confirm() -->
+    <div class="modal-overlay" id="confirm-modal" hidden>
+      <div class="modal-card">
+        <h2 id="confirm-title">Are you sure?</h2>
+        <p class="modal-sub" id="confirm-message"></p>
+        <div class="modal-actions">
+          <button type="button" class="secondary" id="confirm-cancel">Cancel</button>
+          <button type="button" class="primary" id="confirm-ok">Confirm</button>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-overlay" id="help-modal" hidden>
       <div class="modal-card help-card">
         <h2>Help</h2>
@@ -410,8 +539,15 @@
           <li><b>New project</b> — pick a name and a folder. Nothing touches the cloud unless you turn on cloud sync.</li>
           <li><b>Cloud sync</b> — turn it on (per-project) to collaborate live with others; you'll be asked to sign in the first time.</li>
           <li><b>Ctrl+K</b> — jump to any project, open file, or app command.</li>
+          <li><b>Ctrl+P</b> — open any file in the project by typing part of its name (type <b>&gt;</b> for commands).</li>
+          <li><b>Ctrl+Shift+F</b> — search text across every file in the project; click a result to jump to it.</li>
+          <li><b>Ctrl+Shift+X</b> — Extensions: install color themes and snippets from Open VSX. Change theme with <b>View → Color Theme…</b>.</li>
+          <li><b>Ctrl+Shift+G</b> — Source Control: stage, commit, pull and push. Click the branch name in the footer to switch or create branches.</li>
+          <li><b>Ctrl+J</b> — show or hide the bottom panel. Click the ⊗ / ⚠ counts in the footer to jump to Problems.</li>
+          <li><b>Ctrl+`</b> — open the terminal in the current project's folder. Use + for more, and pick PowerShell, Command Prompt or Git Bash.</li>
+          <li><b>Ctrl + / Ctrl −</b> — zoom the whole app in or out; <b>Ctrl+0</b> resets. Remembered between launches.</li>
           <li><b>Right-click a file</b> — rename, duplicate, save as, or delete it.</li>
-          <li><b>Switching projects</b> — only one project stays open at a time; you'll be asked to confirm before switching away from one with unsaved work.</li>
+          <li><b>Switching projects</b> — only one project stays open at a time; you'll be asked to confirm before switching away from one.</li>
         </ul>
 
         <div class="modal-actions">

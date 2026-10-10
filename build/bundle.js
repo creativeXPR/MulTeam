@@ -23,6 +23,26 @@ esbuild.buildSync({
   logLevel: 'info'
 });
 
+// Monaco's language services (TS/JS type checking + IntelliSense, JSON, CSS,
+// HTML) run in Web Workers. Each worker is its own self-contained IIFE
+// bundle in dist/workers/, loaded by URL from monacoEnv.js.
+const monacoEsm = path.join(__dirname, '..', 'node_modules', 'monaco-editor', 'esm', 'vs');
+esbuild.buildSync({
+  entryPoints: {
+    'editor.worker': path.join(monacoEsm, 'editor', 'editor.worker.js'),
+    'ts.worker': path.join(monacoEsm, 'language', 'typescript', 'ts.worker.js'),
+    'json.worker': path.join(monacoEsm, 'language', 'json', 'json.worker.js'),
+    'css.worker': path.join(monacoEsm, 'language', 'css', 'css.worker.js'),
+    'html.worker': path.join(monacoEsm, 'language', 'html', 'html.worker.js')
+  },
+  bundle: true,
+  format: 'iife',
+  platform: 'browser',
+  outdir: path.join(rendererJs, 'dist', 'workers'),
+  define: { 'process.env.NODE_ENV': '"production"' },
+  logLevel: 'info'
+});
+
 // BrowserWindow uses sandbox: true, which restricts the preload script's
 // require() to Node built-ins and 'electron' only — a plain
 // require('../shared/constants') fails there with "module not found" even

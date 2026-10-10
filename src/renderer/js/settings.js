@@ -10,7 +10,8 @@ const DEFAULTS = {
   tabSize: 2,
   ligatures: true,
   minimap: true,
-  autosave: true
+  autosave: true,
+  editorTheme: '' // '' = MulTeam default; else '<extensionId>::<theme label>'
 };
 
 let current = null;

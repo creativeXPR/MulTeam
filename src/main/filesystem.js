@@ -132,11 +132,21 @@ function setupFileSystemHandlers(ipcMain) {
     if (watchers.has(watchPath)) return true;
 
     const sender = event.sender;
-    const watcher = fsSync.watch(watchPath, (eventType, filename) => {
-      const win = BrowserWindow.fromWebContents(sender);
-      if (!win || win.isDestroyed()) return;
-      sender.send(IPC.FILE_CHANGED, { path: watchPath, filename, eventType });
-    });
+    let watcher;
+    try {
+      // recursive: the Explorer needs to hear about changes in subfolders too
+      // (supported on Windows/macOS, and Linux on recent Node/Electron)
+      watcher = fsSync.watch(watchPath, { recursive: true }, (eventType, filename) => {
+        if (filename && /(^|[\\/])(\.git|node_modules)([\\/]|$)/.test(filename)) return; // VCS/deps churn
+        if (sender.isDestroyed()) return;
+        sender.send(IPC.FILE_CHANGED, { path: watchPath, filename, eventType });
+      });
+    } catch (err) {
+      throw new Error(`Can't watch ${watchPath}: ${err.message}`);
+    }
+    // e.g. the folder itself was deleted — stop quietly instead of crashing
+    watcher.on('error', () => { watcher.close(); watchers.delete(watchPath); });
+    sender.once('destroyed', () => { watcher.close(); watchers.delete(watchPath); });
 
     watchers.set(watchPath, watcher);
     return true;

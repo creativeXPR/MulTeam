@@ -17,7 +17,7 @@ import {
   deleteDoc,
   serverTimestamp
 } from 'firebase/firestore';
-import { getDatabase } from 'firebase/database';
+import { getDatabase, ref, onValue } from 'firebase/database';
 import { isSupported as analyticsIsSupported, getAnalytics } from 'firebase/analytics';
 import { firebaseConfig, FIRESTORE_DATABASE_ID } from './firebaseConfig.js';
 import { COLLECTIONS, ROLES } from '../../shared/constants.js';
@@ -33,6 +33,13 @@ export const rtdb = getDatabase(app);
 analyticsIsSupported().then((supported) => {
   if (supported) getAnalytics(app);
 });
+
+// Realtime Database's built-in `.info/connected` flag — true only while the
+// SDK holds a live socket to Firebase, so it reflects whether cloud sync can
+// actually reach the server (navigator.onLine only knows about the adapter).
+export function watchCloudConnection(callback) {
+  return onValue(ref(rtdb, '.info/connected'), (snap) => callback(snap.val() === true));
+}
 
 export function watchAuthState(callback) {
   return onAuthStateChanged(auth, callback);

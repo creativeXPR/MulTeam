@@ -10,6 +10,8 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const RENDERER_PORT = 47321;
+
 const MIME_TYPES = {
   '.html': 'text/html',
   '.js': 'text/javascript',
@@ -17,7 +19,8 @@ const MIME_TYPES = {
   '.json': 'application/json',
   '.map': 'application/json',
   '.png': 'image/png',
-  '.svg': 'image/svg+xml'
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon'
 };
 
 function startRendererServer(rootDir) {
@@ -44,8 +47,17 @@ function startRendererServer(rootDir) {
       });
     });
 
-    server.on('error', reject);
-    server.listen(0, '127.0.0.1', () => resolve(server));
+    // A FIXED port matters: localStorage/IndexedDB are scoped to the origin
+    // (host + port), so a random port would make every launch a new origin
+    // and silently wipe the theme, editor settings and Firebase sign-in.
+    // Falls back to a random port only if the fixed one is taken.
+    server.once('error', (err) => {
+      if (err.code !== 'EADDRINUSE') return reject(err);
+      console.warn(`[multeam] port ${RENDERER_PORT} busy — using a random port; saved preferences won't load this session`);
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', () => resolve(server));
+    });
+    server.listen(RENDERER_PORT, '127.0.0.1', () => resolve(server));
   });
 }
 

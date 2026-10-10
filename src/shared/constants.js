@@ -3,6 +3,8 @@
 
 const IPC = Object.freeze({
   GET_APP_VERSION: 'app:get-version',
+  SET_TITLEBAR_THEME: 'window:setTitleBarTheme',
+  WINDOW_ZOOM: 'window:zoom',
   OPEN_DIRECTORY: 'fs:openDirectory',
   SHOW_SAVE_DIALOG: 'fs:showSaveDialog',
   READ_DIR: 'fs:readDir',
@@ -21,7 +23,35 @@ const IPC = Object.freeze({
   CREATE_PROJECT: 'projects:create',
   UPDATE_PROJECT: 'projects:update',
   DELETE_PROJECT_LOCAL: 'projects:deleteLocal',
-  DUPLICATE_PROJECT: 'projects:duplicate'
+  DUPLICATE_PROJECT: 'projects:duplicate',
+  LIST_FILES: 'search:listFiles',
+  SEARCH_TEXT: 'search:text',
+  GIT_STATUS: 'git:status',
+  GIT_INIT: 'git:init',
+  GIT_STAGE: 'git:stage',
+  GIT_UNSTAGE: 'git:unstage',
+  GIT_DISCARD: 'git:discard',
+  GIT_COMMIT: 'git:commit',
+  GIT_PULL: 'git:pull',
+  GIT_PUSH: 'git:push',
+  GIT_FETCH: 'git:fetch',
+  GIT_BRANCHES: 'git:branches',
+  GIT_CHECKOUT: 'git:checkout',
+  GIT_CREATE_BRANCH: 'git:createBranch',
+  EXT_SEARCH: 'ext:search',
+  EXT_INSTALL: 'ext:install',
+  EXT_UNINSTALL: 'ext:uninstall',
+  EXT_LIST: 'ext:list',
+  EXT_READ_THEME: 'ext:readTheme',
+  EXT_READ_SNIPPETS: 'ext:readSnippets',
+  EXT_ICON: 'ext:icon',
+  TERM_SHELLS: 'term:shells',
+  TERM_CREATE: 'term:create',
+  TERM_WRITE: 'term:write',
+  TERM_RESIZE: 'term:resize',
+  TERM_KILL: 'term:kill',
+  TERM_DATA: 'term:data',
+  TERM_EXIT: 'term:exit'
 });
 
 const ROLES = Object.freeze({

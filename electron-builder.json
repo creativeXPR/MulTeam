@@ -10,12 +10,17 @@
     "package.json",
     "!src/renderer/js/firebaseConfig.js"
   ],
+  "asarUnpack": [
+    "node_modules/node-pty/**"
+  ],
+  "icon": "build/icon.png",
   "mac": {
     "category": "public.app-category.developer-tools",
     "target": ["dmg", "zip"]
   },
   "win": {
-    "target": ["nsis", "portable"]
+    "target": ["nsis", "portable"],
+    "icon": "build/icon.ico"
   },
   "linux": {
     "target": ["AppImage", "deb"]

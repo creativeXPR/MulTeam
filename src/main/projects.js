@@ -2,7 +2,8 @@
 // userData directory, functioning like a local mirror of a Firestore
 // collection. This is the source of truth for the dashboard; Firestore is
 // only ever written to when a project has cloud sync explicitly enabled.
-const { app } = require('electron');
+const { app, shell } = require('electron');
+const os = require('node:os');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -66,8 +67,34 @@ async function updateProject(id, patch) {
   return writeRecord({ ...existing, ...patch, id });
 }
 
-async function deleteProjectLocal(id) {
+// Removes the project from the registry. With { deleteFolder: true } it also
+// sends the project's folder to the OS Recycle Bin/Trash (recoverable, never
+// a permanent rm) — refusing drive roots, the home directory, and folders
+// another registered project still points at.
+async function deleteProjectLocal(id, { deleteFolder = false } = {}) {
   const dir = await ensureRegistryDir();
+
+  if (deleteFolder) {
+    const existing = await readRecord(dir, `${id}.json`);
+    if (!existing) throw new Error(`No project found with id ${id}`);
+    const folder = path.resolve(existing.folderPath);
+
+    if (folder === path.parse(folder).root || folder === path.resolve(os.homedir())) {
+      throw new Error(`Refusing to delete ${folder} — it's a drive root or your home folder.`);
+    }
+    const others = (await listProjects()).filter((p) => p.id !== id && path.resolve(p.folderPath) === folder);
+    if (others.length) {
+      throw new Error(`"${others[0].name}" also uses this folder, so it wasn't deleted.`);
+    }
+    try {
+      await fs.access(folder);
+      await shell.trashItem(folder);
+    } catch (err) {
+      if (err.code !== 'ENOENT') throw new Error(`Couldn't move the folder to the Recycle Bin: ${err.message}`);
+      // Folder already gone — nothing to delete, just drop the record.
+    }
+  }
+
   await fs.rm(path.join(dir, `${id}.json`), { force: true });
 }
 
@@ -101,7 +128,7 @@ function setupProjectHandlers(ipcMain, IPC) {
   ipcMain.handle(IPC.GET_PROJECT, (_e, id) => getProject(id));
   ipcMain.handle(IPC.CREATE_PROJECT, (_e, params) => createProject(params));
   ipcMain.handle(IPC.UPDATE_PROJECT, (_e, id, patch) => updateProject(id, patch));
-  ipcMain.handle(IPC.DELETE_PROJECT_LOCAL, (_e, id) => deleteProjectLocal(id));
+  ipcMain.handle(IPC.DELETE_PROJECT_LOCAL, (_e, id, options) => deleteProjectLocal(id, options));
   ipcMain.handle(IPC.DUPLICATE_PROJECT, (_e, id) => duplicateProject(id));
 }
 
