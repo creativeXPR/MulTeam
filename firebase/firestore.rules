@@ -28,5 +28,59 @@ service cloud.firestore {
       allow read, write: if isAuthenticated() && isProjectMember(resource.data.ownerId, resource.data.projectId);
       allow create: if isAuthenticated() && isProjectMember(request.resource.data.ownerId, request.resource.data.projectId);
     }
+
+    // ---------- Plugin gallery (renderer/js/firebase.js → gallery*) ----------
+    // Anyone may browse. Signed-in users publish; the first publisher of an
+    // id owns it. Versions are immutable. Anyone may bump the download
+    // counter by exactly one.
+    function validListing(d) {
+      return d.name is string && d.name.size() > 0 && d.name.size() <= 80
+        && d.description is string && d.description.size() <= 500
+        && d.authorName is string && d.authorName.size() <= 80
+        && d.latestVersion is string && d.latestVersion.size() > 0 && d.latestVersion.size() <= 40
+        && d.permissions is list && d.permissions.size() <= 3
+        && d.size is int && d.size > 0 && d.size <= 716800
+        && d.downloads is int && d.downloads >= 0;
+    }
+
+    match /pluginGallery/{pluginId} {
+      allow read: if true;
+
+      allow create: if isAuthenticated()
+        && pluginId.matches('^[a-z0-9][a-z0-9-]{1,63}$')
+        && request.resource.data.authorUid == request.auth.uid
+        && request.resource.data.downloads == 0
+        && validListing(request.resource.data);
+
+      allow update: if isAuthenticated() && (
+        // the owner publishing a new version (counter and owner unchanged)
+        (resource.data.authorUid == request.auth.uid
+          && request.resource.data.authorUid == resource.data.authorUid
+          && request.resource.data.downloads == resource.data.downloads
+          && validListing(request.resource.data))
+        // anyone: download counter +1, nothing else
+        || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['downloads'])
+          && request.resource.data.downloads == resource.data.downloads + 1)
+      );
+
+      allow delete: if isAuthenticated() && resource.data.authorUid == request.auth.uid;
+
+      match /versions/{version} {
+        allow read: if true;
+
+        // getAfter: the listing may be created in the same batch
+        allow create: if isAuthenticated()
+          && getAfter(/databases/$(database)/documents/pluginGallery/$(pluginId)).data.authorUid == request.auth.uid
+          && getAfter(/databases/$(database)/documents/pluginGallery/$(pluginId)).data.latestVersion == version
+          && request.resource.data.version == version
+          && request.resource.data.package is string && request.resource.data.package.size() > 0 && request.resource.data.package.size() <= 960000
+          && request.resource.data.sha256 is string && request.resource.data.sha256.matches('^[0-9a-f]{64}$')
+          && request.resource.data.size is int && request.resource.data.size <= 716800;
+
+        allow update: if false;
+        allow delete: if isAuthenticated()
+          && get(/databases/$(database)/documents/pluginGallery/$(pluginId)).data.authorUid == request.auth.uid;
+      }
+    }
   }
 }

@@ -4,6 +4,9 @@
 // Worker (renderer/js/pluginHost.js); this module only lists, installs,
 // scaffolds and removes them, and hands their code over.
 const { app, dialog, shell, BrowserWindow } = require('electron');
+const crypto = require('node:crypto');
+const AdmZip = require('adm-zip');
+const { TEMPLATES } = require('./pluginTemplates');
 const fs = require('node:fs/promises');
 const fsSync = require('node:fs');
 const path = require('node:path');
@@ -26,7 +29,7 @@ async function writeState(state) {
 // Validates a manifest; returns a normalized copy or throws a readable error.
 function validateManifest(m, folderName) {
   if (!m || typeof m !== 'object') throw new Error(`${MANIFEST} is not a JSON object.`);
-  const id = m.id || folderName;
+  const id = m.id || folderName || '';
   if (!ID_RE.test(id || '')) throw new Error(`Plugin id "${id}" must be 2–64 lowercase letters, digits or dashes.`);
   if (!m.name) throw new Error('Manifest needs a "name".');
   const main = m.main || 'main.js';
@@ -105,103 +108,129 @@ async function setEnabled(id, enabled) {
   await writeState(state);
 }
 
-// Writes a small, working example plugin the user can edit.
-async function scaffold(name) {
-  const id = String(name).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64) || 'my-plugin';
+// ---------- templates ----------
+function slug(name) {
+  return String(name).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64) || 'my-plugin';
+}
+
+// Creates a new plugin from one of the starter templates.
+async function scaffold(name, templateId = 'hello-command') {
+  const tpl = TEMPLATES.find((t) => t.id === templateId) || TEMPLATES[0];
+  const id = slug(name);
   if (!ID_RE.test(id)) throw new Error('Pick a name with letters or digits.');
   const dir = path.join(pluginsRoot(), id);
   if (fsSync.existsSync(dir)) throw new Error(`A plugin called "${id}" already exists.`);
+  const fill = (txt) => txt.replace(/\{name\}/g, String(name).trim()).replace(/\{id\}/g, id);
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(path.join(dir, MANIFEST), JSON.stringify({
     id,
     name: String(name).trim(),
     version: '0.1.0',
-    description: 'My first MulTeam plugin.',
+    description: tpl.summary,
     main: 'main.js',
-    permissions: ['editor']
+    permissions: tpl.permissions
   }, null, 2) + '\n');
-  await fs.writeFile(path.join(dir, 'main.js'), SAMPLE_MAIN);
-  await fs.writeFile(path.join(dir, 'README.md'), SAMPLE_README.replace(/\{name\}/g, String(name).trim()));
+  await fs.writeFile(path.join(dir, 'main.js'), fill(tpl.main));
+  await fs.writeFile(path.join(dir, 'README.md'), fill(tpl.readme));
   return { id, dir };
 }
 
-const SAMPLE_MAIN = `// A MulTeam plugin runs in a sandboxed worker. Everything goes through the
-// global \`multeam\` API (see README.md). Edit this file, then press Reload
-// on the plugin in the Extensions view.
+// ---------- .mtplugin packages (a zip of the plugin folder) ----------
+const MAX_PACKAGE_BYTES = 700 * 1024; // fits a Firestore document with room to spare
+const SKIP = /(^|[\\/])(node_modules|\.git|\.DS_Store)([\\/]|$)/;
 
-// 1) A command — shows up in the command palette (Ctrl+K).
-multeam.commands.register('sayHello', 'Say hello', async () => {
-  const name = await multeam.window.showInput({ title: 'Say hello', label: 'Your name' });
-  if (name) multeam.window.showMessage(\`Hello, \${name}! 👋\`);
-});
-
-// 2) A command that edits the code (needs the "editor" permission).
-multeam.commands.register('upperCase', 'Make selection UPPERCASE', async () => {
-  const text = await multeam.editor.getSelectedText();
-  if (!text) return multeam.window.showError('Select some text first.');
-  await multeam.editor.replaceSelection(text.toUpperCase());
-});
-
-// 3) A live status item in the footer — word count of the open file.
-async function updateWordCount() {
-  const text = await multeam.editor.getText();
-  const words = text ? (text.match(/\\S+/g) || []).length : 0;
-  multeam.window.setStatus(text === null ? '' : \`\${words} words\`);
+async function packFolder(dir) {
+  const zip = new AdmZip();
+  const walk = async (d, rel = '') => {
+    for (const e of await fs.readdir(d, { withFileTypes: true })) {
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (SKIP.test(r)) continue;
+      const full = path.join(d, e.name);
+      if (e.isDirectory()) await walk(full, r);
+      else if (e.isFile()) zip.addFile(r, await fs.readFile(full));
+    }
+  };
+  await walk(dir);
+  const buf = zip.toBuffer();
+  if (buf.length > MAX_PACKAGE_BYTES) throw new Error(`The package is ${(buf.length / 1024).toFixed(0)} KB — plugins can be at most ${MAX_PACKAGE_BYTES / 1024} KB.`);
+  return buf;
 }
-multeam.on('open', updateWordCount);
-multeam.on('save', updateWordCount);
-updateWordCount();
 
-// 4) Completions — type "todo" in a JavaScript file.
-multeam.languages.registerCompletions('javascript', () => [
-  { label: 'todo', insertText: '// TODO(\${1:me}): \${2:describe}', detail: 'TODO comment' }
-]);
-`;
+// Reads + validates a package without installing it.
+function inspectPackage(buf) {
+  if (buf.length > MAX_PACKAGE_BYTES) throw new Error('That package is too large to be a MulTeam plugin.');
+  let zip;
+  try { zip = new AdmZip(buf); } catch { throw new Error('That file isn’t a valid .mtplugin package.'); }
+  const entry = zip.getEntry(MANIFEST);
+  if (!entry) throw new Error(`The package has no ${MANIFEST}.`);
+  const manifest = validateManifest(JSON.parse(entry.getData().toString('utf8')), null);
+  if (!zip.getEntry(manifest.main)) throw new Error(`The package is missing its entry file (${manifest.main}).`);
+  return { zip, manifest };
+}
 
-const SAMPLE_README = `# {name}
+async function installBuffer(buf) {
+  const { zip, manifest } = inspectPackage(buf);
+  const dest = path.join(pluginsRoot(), manifest.id);
+  const tmp = `${dest}.installing`;
+  await fs.rm(tmp, { recursive: true, force: true });
+  await fs.mkdir(tmp, { recursive: true });
+  try {
+    for (const e of zip.getEntries()) {
+      if (e.isDirectory || SKIP.test(e.entryName)) continue;
+      const out = path.resolve(tmp, e.entryName);
+      if (!out.startsWith(path.resolve(tmp) + path.sep)) continue; // zip-slip guard
+      await fs.mkdir(path.dirname(out), { recursive: true });
+      await fs.writeFile(out, e.getData());
+    }
+    await fs.rm(dest, { recursive: true, force: true });
+    await fs.rename(tmp, dest);
+  } catch (err) {
+    await fs.rm(tmp, { recursive: true, force: true });
+    throw err;
+  }
+  return manifest;
+}
 
-A MulTeam plugin. Files:
+async function exportPackage(event, id) {
+  if (!ID_RE.test(id)) throw new Error('Invalid plugin id.');
+  const dir = path.join(pluginsRoot(), id);
+  const manifest = await readPlugin(dir);
+  const buf = await packFolder(dir);
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const res = await dialog.showSaveDialog(win, {
+    title: 'Export plugin package',
+    defaultPath: path.join(app.getPath('documents'), `${manifest.id}-${manifest.version}.mtplugin`),
+    filters: [{ name: 'MulTeam plugin', extensions: ['mtplugin'] }]
+  });
+  if (res.canceled || !res.filePath) return null;
+  await fs.writeFile(res.filePath, buf);
+  return res.filePath;
+}
 
-- \`multeam-plugin.json\` — manifest: \`id\`, \`name\`, \`version\`, \`description\`, \`main\`, \`permissions\`
-- \`main.js\` — runs in a sandboxed Web Worker with a global \`multeam\` object
+async function installPackageFile(event) {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const pick = await dialog.showOpenDialog(win, { title: 'Install a .mtplugin package', properties: ['openFile'], filters: [{ name: 'MulTeam plugin', extensions: ['mtplugin', 'zip'] }] });
+  if (pick.canceled || !pick.filePaths[0]) return null;
+  return installBuffer(await fs.readFile(pick.filePaths[0]));
+}
 
-## Permissions
+// For the gallery: pack an installed plugin as base64 + its SHA-256.
+async function packForPublish(id) {
+  if (!ID_RE.test(id)) throw new Error('Invalid plugin id.');
+  const dir = path.join(pluginsRoot(), id);
+  const manifest = await readPlugin(dir);
+  const buf = await packFolder(dir);
+  return { manifest, size: buf.length, sha256: crypto.createHash('sha256').update(buf).digest('hex'), base64: buf.toString('base64') };
+}
 
-| permission        | unlocks |
-|-------------------|---------|
-| \`editor\`          | \`multeam.editor.*\` — read/insert/replace text in the open file |
-| \`workspace.read\`  | \`multeam.workspace.getRoot / listFiles / readFile\` |
-| \`workspace.write\` | \`multeam.workspace.writeFile\` |
-
-Commands, messages, input prompts, the status item, completions and events need no permission.
-
-## API
-
-\`\`\`js
-multeam.commands.register(id, title, handler)        // appears in Ctrl+K as "{name}: title"
-multeam.window.showMessage(text) / showError(text)
-await multeam.window.showInput({ title, label, placeholder, value })  // string | null
-multeam.window.setStatus(text)                        // footer text ('' hides it)
-
-await multeam.editor.getText()          // string, or null when no file is open
-await multeam.editor.getSelectedText()
-await multeam.editor.replaceSelection(text)
-await multeam.editor.insertText(text)   // at the cursor
-await multeam.editor.getFile()          // { path, language } | null
-
-await multeam.workspace.getRoot()       // project folder | null
-await multeam.workspace.listFiles()     // relative paths
-await multeam.workspace.readFile(relativePath)
-await multeam.workspace.writeFile(relativePath, text)
-
-multeam.languages.registerCompletions(languageId, (ctx) => [
-  { label, insertText, detail }        // insertText may use $1 / \${1:placeholder}
-])
-
-multeam.on('open', ({ path, language }) => {})
-multeam.on('save', ({ path }) => {})
-\`\`\`
-`;
+// From the gallery: verify the hash the publisher recorded, then install.
+async function installFromGallery(base64, sha256) {
+  const buf = Buffer.from(String(base64 || ''), 'base64');
+  if (crypto.createHash('sha256').update(buf).digest('hex') !== String(sha256 || '').toLowerCase()) {
+    throw new Error('Checksum mismatch — the package doesn’t match what was published.');
+  }
+  return installBuffer(buf);
+}
 
 function setupPluginHandlers(ipcMain, IPC) {
   ipcMain.handle(IPC.PLUGIN_LIST, () => list());
@@ -209,7 +238,12 @@ function setupPluginHandlers(ipcMain, IPC) {
   ipcMain.handle(IPC.PLUGIN_INSTALL_FOLDER, (e) => installFromFolder(e));
   ipcMain.handle(IPC.PLUGIN_UNINSTALL, (_e, id) => uninstall(id));
   ipcMain.handle(IPC.PLUGIN_SET_ENABLED, (_e, id, enabled) => setEnabled(id, enabled));
-  ipcMain.handle(IPC.PLUGIN_SCAFFOLD, (_e, name) => scaffold(name));
+  ipcMain.handle(IPC.PLUGIN_SCAFFOLD, (_e, name, templateId) => scaffold(name, templateId));
+  ipcMain.handle(IPC.PLUGIN_TEMPLATES, () => TEMPLATES.map(({ id, title, summary, permissions }) => ({ id, title, summary, permissions })));
+  ipcMain.handle(IPC.PLUGIN_EXPORT, (e, id) => exportPackage(e, id));
+  ipcMain.handle(IPC.PLUGIN_INSTALL_PACKAGE, (e) => installPackageFile(e));
+  ipcMain.handle(IPC.PLUGIN_PACK, (_e, id) => packForPublish(id));
+  ipcMain.handle(IPC.PLUGIN_INSTALL_GALLERY, (_e, base64, sha256) => installFromGallery(base64, sha256));
   ipcMain.handle(IPC.PLUGIN_OPEN_FOLDER, async (_e, id) => {
     if (!ID_RE.test(id)) throw new Error('Invalid plugin id.');
     const err = await shell.openPath(path.join(pluginsRoot(), id));

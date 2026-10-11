@@ -489,7 +489,10 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 13p
 .branch-menu .menubar__item { gap: 8px; }
 
 /* ===== extensions ===== */
-.ext__filter { margin-top: 8px; }
+.ext__tabs { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 8px; padding: 2px; border: 1px solid var(--line); border-radius: var(--r); }
+.ext__tabs button { flex: 1 1 auto; padding: 3px 8px; border: 0; border-radius: var(--r-sm); background: none; font-size: 11.5px; color: var(--muted); white-space: nowrap; transition: background .15s, color .15s; }
+.ext__tabs button:hover { color: var(--text); background: var(--fill); }
+.ext__tabs button.is-on { background: color-mix(in srgb, var(--violet-500) 12%, transparent); color: var(--violet-500); font-weight: 500; }
 .ext__list { flex: 1; min-height: 0; overflow: auto; padding: 0 2px 10px; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
 .ext__section { display: flex; align-items: center; gap: 6px; padding: 10px 6px 4px; color: var(--muted); font-size: 10.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
 .ext__src { margin-left: auto; font-weight: 500; letter-spacing: 0; text-transform: none; font-size: 10.5px; }
@@ -518,6 +521,43 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 13p
 .lang-status.is-cta { color: var(--violet-500); }
 .lang-status.is-ok { color: var(--text-2); }
 .lang-status.is-error { color: var(--danger); }
+
+/* ===== plugins space ===== */
+#confirm-message { white-space: pre-line; }
+.plugin__tip { padding: 10px 6px; color: var(--muted); font-size: 12px; }
+.linkbtn { border: 0; background: none; padding: 0; color: var(--violet-500); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.learn { display: flex; flex-direction: column; gap: 8px; padding: 2px 4px 10px; }
+.learn__card { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r); background: none; text-align: left; color: var(--text); transition: border-color .15s, background .15s; }
+.learn__card:hover { border-color: var(--violet-400); background: color-mix(in srgb, var(--violet-500) 5%, transparent); }
+.learn__card b { font-size: 13px; font-weight: 600; }
+.learn__card span { font-size: 11.5px; color: var(--text-2); line-height: 1.45; }
+.learn__ref { padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r); }
+.learn__ref b { font-size: 12px; }
+.learn__ref pre { margin: 6px 0 0; font: 11px/1.6 var(--mono); color: var(--text-2); white-space: pre; overflow-x: auto; scrollbar-width: thin; }
+.plugin__bar { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 6px 6px; }
+.plugin__bar .chipbtn { font-size: 11px; }
+.ext__acts { flex-wrap: wrap; }
+.chipbtn { white-space: nowrap; }
+.ext__top { min-width: 0; }
+
+/* tutorial page (main area) */
+.tutorial { padding: 22px clamp(18px, 5vw, 64px) 40px; }
+.tutorial__toc { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 16px 0 6px; font-size: 12px; }
+.tutorial__toc a { color: var(--muted); text-decoration: none; }
+.tutorial__toc a:hover { color: var(--violet-500); }
+.tutorial__body { max-width: 760px; font-size: 13.5px; line-height: 1.65; color: var(--text-2); }
+.tutorial__body h3 { margin: 28px 0 8px; font-size: 15px; color: var(--text); scroll-margin-top: 12px; }
+.tutorial__body p, .tutorial__body ol, .tutorial__body ul { margin: 0 0 10px; }
+.tutorial__body li { margin: 3px 0; }
+.tutorial__body b { color: var(--text); font-weight: 600; }
+.tutorial__body code { font: 12px var(--mono); padding: 1px 5px; border-radius: 5px; background: var(--fill-2); color: var(--text); }
+.tutorial__body pre { margin: 6px 0 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r); overflow-x: auto; }
+.tutorial__body pre code { padding: 0; background: none; font-size: 12px; line-height: 1.6; color: var(--text); }
+.tutorial__note { padding: 8px 12px; border-left: 2px solid var(--violet-400); background: color-mix(in srgb, var(--violet-500) 6%, transparent); border-radius: 0 var(--r-sm) var(--r-sm) 0; }
+.tutorial__table { border-collapse: collapse; margin: 6px 0 12px; font-size: 12.5px; }
+.tutorial__table th, .tutorial__table td { text-align: left; padding: 6px 14px 6px 0; border-bottom: 1px solid var(--line-soft); }
+.tutorial__table th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.tutorial__end { display: flex; gap: 8px; margin-top: 26px; }
 
 /* ===== plugins ===== */
 .plugin__headacts { margin-left: auto; display: flex; gap: 4px; text-transform: none; letter-spacing: 0; font-weight: 500; }

@@ -152,6 +152,37 @@ const CATALOG = [
   }
 ];
 
+// Formatters/linters: installed exactly like servers, but run per request
+// by main/tools.js instead of as long-lived LSP processes.
+const RUFF_ASSET = {
+  'win32-x64': 'ruff-x86_64-pc-windows-msvc.zip', 'win32-arm64': 'ruff-aarch64-pc-windows-msvc.zip',
+  'darwin-x64': 'ruff-x86_64-apple-darwin.tar.gz', 'darwin-arm64': 'ruff-aarch64-apple-darwin.tar.gz',
+  'linux-x64': 'ruff-x86_64-unknown-linux-gnu.tar.gz', 'linux-arm64': 'ruff-aarch64-unknown-linux-gnu.tar.gz'
+}[`${process.platform}-${process.arch}`];
+
+CATALOG.push(
+  {
+    id: 'prettier',
+    kind: 'tool',
+    name: 'Prettier',
+    description: 'Formatter for JavaScript, TypeScript, JSON, CSS/SCSS/Less, HTML, Markdown and YAML. Follows the project\u2019s .prettierrc when there is one.',
+    languages: ['javascript', 'typescript', 'json', 'css', 'scss', 'less', 'html', 'markdown', 'yaml', 'graphql'],
+    approxMB: 10,
+    source: { type: 'npm', packages: [{ name: 'prettier', version: '3.9.10' }] },
+    serverFile: ['node_modules', 'prettier', 'bin', 'prettier.cjs']
+  },
+  {
+    id: 'ruff',
+    kind: 'tool',
+    name: 'Ruff (Python)',
+    description: 'Extremely fast Python formatter and linter (replaces Black + flake8). Follows pyproject.toml / ruff.toml when present.',
+    languages: ['python'],
+    approxMB: 10,
+    source: { type: 'github', repo: 'astral-sh/ruff', tag: '0.17.0', asset: RUFF_ASSET },
+    serverFile: [`ruff${EXE}`]
+  }
+);
+
 const specFor = (id) => {
   const s = CATALOG.find((x) => x.id === id);
   if (!s) throw new Error(`Unknown language support "${id}".`);
@@ -164,7 +195,7 @@ async function list() {
   return Promise.all(CATALOG.map(async (s) => {
     const meta = await readMeta(s.id);
     return {
-      id: s.id, name: s.name, description: s.description, languages: s.languages, approxMB: s.approxMB,
+      id: s.id, kind: s.kind || 'server', name: s.name, description: s.description, languages: s.languages, approxMB: s.approxMB,
       source: describeSource(s.source),
       installed: isInstalled(s),
       variant: meta?.variant || null,
@@ -234,6 +265,7 @@ async function extractTgz(tgz, destDir) {
     if (header.every((b) => b === 0)) break;
     let name = str(off, 100);
     const size = parseInt(str(off + 124, 12).trim() || '0', 8);
+    const mode = parseInt(str(off + 100, 8).trim() || '0', 8);
     const type = String.fromCharCode(header[156] || 48);
     const prefix = str(off + 345, 155);
     if (prefix) name = `${prefix}/${name}`;
@@ -250,6 +282,7 @@ async function extractTgz(tgz, destDir) {
     if (type === '5') { await fs.mkdir(out, { recursive: true }); continue; }
     await fs.mkdir(path.dirname(out), { recursive: true });
     await fs.writeFile(out, data);
+    if (!IS_WIN && mode & 0o111) await fs.chmod(out, 0o755);
   }
 }
 
@@ -286,7 +319,8 @@ async function installGithub(src, tmp, progress) {
   const buf = await fetchBuffer(asset.browser_download_url, (rec, total) => progress((total ? rec / total : 0) * 0.9, `${(rec / 1048576).toFixed(1)} / ${(asset.size / 1048576).toFixed(1)} MB`));
   verifySha256Hex(buf, asset.digest);
   progress(0.93, 'unpacking');
-  await extractZip(buf, tmp);
+  if (/\.tar\.gz$|\.tgz$/.test(asset.name)) await extractTgz(buf, tmp); // strips the top folder
+  else await extractZip(buf, tmp);
   return {};
 }
 
@@ -362,6 +396,7 @@ function frame(msg) {
 
 async function start(id, rootPath, sender) {
   const spec = specFor(id);
+  if (!spec.launch) throw new Error(`${spec.name} isn't a language server.`);
   if (!isInstalled(spec)) throw new Error(`${spec.name} support isn't installed.`);
   const meta = (await readMeta(id)) || {};
   const key = `${sender.id}:${id}`;
@@ -440,4 +475,4 @@ function setupLanguageHandlers(ipcMain, IPC) {
   });
 }
 
-module.exports = { setupLanguageHandlers, stopAllLanguageServers: stopAll };
+module.exports = { setupLanguageHandlers, stopAllLanguageServers: stopAll, toolPath: (id) => { const s = specFor(id); return isInstalled(s) ? path.join(dirFor(id), ...s.serverFile) : null; } };

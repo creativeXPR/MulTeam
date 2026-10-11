@@ -15,7 +15,9 @@ import { initScm } from './scm.js';
 import { initSidebarResize } from './sidebarResize.js';
 import { initExtensions } from './extensions.js';
 import { initPluginHost } from './pluginHost.js';
+import { initPluginSpace } from './pluginSpace.js';
 import { initLanguageSupport } from './languageSupport.js';
+import { initFormatting } from './formatting.js';
 import {
   fileIconSvg, folderIconSvg, chevronSvg, colorForExtension,
   saveIconSvg, trashIconSvg,
@@ -30,7 +32,8 @@ applyStoredTheme();
    ============================================================ */
 const views = {
   dashboard: document.getElementById('view-dashboard'),
-  editor: document.getElementById('view-editor')
+  editor: document.getElementById('view-editor'),
+  tutorial: document.getElementById('view-tutorial')
 };
 const navBtns = [...document.querySelectorAll('.sidearray .ibtn[data-nav]')];
 
@@ -871,8 +874,14 @@ async function activateTabInner(filePath) {
   });
 }
 
-function saveActiveFile(filePath) {
+// `explicit` = the user asked to save (Ctrl+S / File → Save). Only then is
+// "Format on save" applied — autosave never reformats under your cursor.
+async function saveActiveFile(filePath, { explicit = false } = {}) {
   if (!activeWorkspace || activeTabPath !== filePath) return;
+  if (explicit && getSettings().formatOnSave) {
+    try { await activeWorkspace.editor.getAction('editor.action.formatDocument')?.run(); } catch { /* formatter errors are toasted by the formatter */ }
+    if (!activeWorkspace || activeTabPath !== filePath) return;
+  }
   window.electronAPI.writeFile(filePath, activeWorkspace.getValue()).then(() => {
     scm.refreshSoon();
     pluginHost.emit('save', { path: filePath });
@@ -1218,6 +1227,11 @@ document.getElementById('toggleMinimap').addEventListener('click', function () {
   updateSettings({ minimap: this.classList.contains('is-on') });
   applyLiveEditorSettings();
 });
+document.getElementById('toggleFormatOnSave').classList.toggle('is-on', !!s0.formatOnSave);
+document.getElementById('toggleFormatOnSave').addEventListener('click', function () {
+  this.classList.toggle('is-on');
+  updateSettings({ formatOnSave: this.classList.contains('is-on') });
+});
 document.getElementById('toggleAutosave').addEventListener('click', function () {
   this.classList.toggle('is-on');
   updateSettings({ autosave: this.classList.contains('is-on') });
@@ -1320,6 +1334,7 @@ function showSide(name) {
   document.querySelectorAll('.sidearray [data-side]').forEach((b) => b.classList.toggle('is-on', b.dataset.side === name));
   if (name === 'scm') scm.refresh();
   if (name === 'ext') extensions.onShow();
+  if (name === 'plugins') pluginSpace.onShow();
   if (isSidebarCollapsed()) { setSidebarCollapsed(false); sidebarResize.remember(false); }
 }
 // The Editor (</>) icon doubles as "Explorer": it always brings the
@@ -1365,6 +1380,11 @@ const palette = initCommandPalette({
     { label: 'Find in files', hint: 'Ctrl+Shift+F', action: () => openFindInFiles() },
     { label: 'Preferences: Color Theme', action: () => setTimeout(() => extensions.openThemePicker(), 0) },
     { label: 'Preferences: File Icon Theme', action: () => setTimeout(() => extensions.openIconThemePicker(), 0) },
+    { label: 'Format Document', hint: 'Shift+Alt+F', action: () => setTimeout(() => activeWorkspace && activeWorkspace.editor.getAction('editor.action.formatDocument')?.run(), 0) },
+    { label: 'ESLint: Ask again before running project ESLint', action: () => formatting.resetEslintPermission() },
+    { label: 'Plugins: Open gallery', action: () => { showSide('plugins'); pluginSpace.showTab('gallery'); } },
+    { label: 'Plugins: New from template', action: () => { showSide('plugins'); pluginSpace.showTab('templates'); } },
+    { label: 'Plugins: Tutorial', action: () => go('tutorial') },
     { label: 'Plugins: Reload all', action: () => pluginHost.reloadAll().then(() => toast('Plugins reloaded')) },
     { label: 'Extensions: Install themes & snippets', hint: 'Ctrl+Shift+X', action: () => showSide('ext') },
     { label: 'Refresh Explorer', action: () => refreshTree() },
@@ -1409,6 +1429,13 @@ document.getElementById('explorerActs').addEventListener('click', (e) => {
     refreshTree();
     scm.refresh();
   }
+});
+
+document.getElementById('view-tutorial').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-tutorial]');
+  if (b) { showSide('plugins'); pluginSpace.showTab(b.dataset.tutorial); }
+  const a = e.target.closest('.tutorial__toc a');
+  if (a) { e.preventDefault(); document.querySelector(a.getAttribute('href'))?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
 });
 
 function toggleSidebar() {
@@ -1475,7 +1502,7 @@ initMenubar(document.getElementById('menubar'), [
     '-',
     { label: 'Open Project…', kbd: 'Ctrl+K', run: openPalette },
     '-',
-    { label: 'Save', kbd: 'Ctrl+S', run: () => saveActiveFile(activeTabPath), enabled: hasEditor },
+    { label: 'Save', kbd: 'Ctrl+S', run: () => saveActiveFile(activeTabPath, { explicit: true }), enabled: hasEditor },
     { label: 'Save As…', run: () => saveFileAs(activeTabPath), enabled: hasEditor },
     '-',
     { label: 'Rename File…', run: () => openRenameModal(activeNode()), enabled: hasEditor },
@@ -1530,6 +1557,7 @@ initMenubar(document.getElementById('menubar'), [
     { label: 'Search', kbd: 'Ctrl+Shift+F', run: () => openFindInFiles() },
     { label: 'Source Control', kbd: 'Ctrl+Shift+G', run: () => openSourceControl() },
     { label: 'Extensions', kbd: 'Ctrl+Shift+X', run: () => showSide('ext') },
+    { label: 'Plugins', run: () => showSide('plugins') },
     '-',
     { label: 'Problems', run: () => { go('editor'); bottomPanel.open('problems'); } },
     { label: 'Terminal', kbd: 'Ctrl+`', run: () => { go('editor'); bottomPanel.open('terminal'); } },
@@ -1565,6 +1593,7 @@ initMenubar(document.getElementById('menubar'), [
   { label: 'Help', items: [
     { label: 'Show Help', run: openHelp },
     { label: 'Keyboard Shortcuts', run: openHelp },
+    { label: 'Plugin Tutorial', run: () => go('tutorial') },
     '-',
     { label: 'About MulTeam', run: async () => toast(`MulTeam v${await window.electronAPI.getAppVersion()} · Electron, Monaco, Yjs & Firebase`) }
   ] }
@@ -1574,6 +1603,7 @@ const extensions = initExtensions({
   toast,
   confirmDialog,
   pick: (opts) => { closeAllOverlays(); palette.pick(opts); },
+  onTabChange: (tab, query) => languageSupport.setView(tab, query),
   // re-draw everything that shows file/folder icons
   onIconThemeChange: () => {
     document.querySelectorAll('#panel-project-list > .subitem.directory').forEach((row) => {
@@ -1587,7 +1617,11 @@ const extensions = initExtensions({
   }
 });
 
+const formatting = initFormatting({ toast, confirmDialog, getRoot: () => rootFolder });
+
 const languageSupport = initLanguageSupport({
+  onCatalogChange: (catalog) => formatting.setCatalog(catalog),
+  lspShouldFormat: (lang) => !formatting.hasFormatter(lang),
   toast,
   confirmDialog,
   getRoot: () => rootFolder,
@@ -1596,8 +1630,17 @@ const languageSupport = initLanguageSupport({
   showExtensions: () => showSide('ext')
 });
 
+const pluginSpace = initPluginSpace({
+  toast,
+  confirmDialog,
+  promptDialog,
+  getPluginHost: () => pluginHost,
+  openTutorial: () => go('tutorial')
+});
+
 // What plugins may touch (each call is permission-checked in pluginHost.js).
 const pluginHost = initPluginHost({
+  space: pluginSpace,
   toast,
   confirmDialog,
   promptDialog,
@@ -1643,7 +1686,7 @@ function appShortcut(e) {
   if (!e.shiftKey && k === 'b') return toggleSidebar;
   if (!e.shiftKey && k === 'j') return () => (bottomPanel.isOpen() ? bottomPanel.close() : (go('editor'), bottomPanel.open()));
   if (!e.shiftKey && k === 'w' && activeTabPath) return () => closeTab(activeTabPath);
-  if (!e.shiftKey && k === 's') return () => { if (activeTabPath) saveActiveFile(activeTabPath); };
+  if (!e.shiftKey && k === 's') return () => { if (activeTabPath) saveActiveFile(activeTabPath, { explicit: true }); };
   if (e.key === ',') return openSettings;
   return null;
 }

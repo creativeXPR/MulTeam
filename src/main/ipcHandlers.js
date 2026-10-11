@@ -8,6 +8,7 @@ const { setupGitHandlers } = require('./git');
 const { setupExtensionHandlers } = require('./extensions');
 const { setupPluginHandlers } = require('./plugins');
 const { setupLanguageHandlers } = require('./languages');
+const { setupToolHandlers } = require('./tools');
 const { titleBarOverlayFor, zoom } = require('./window');
 
 function registerIpcHandlers(ipcMain) {
@@ -34,6 +35,7 @@ function registerIpcHandlers(ipcMain) {
   setupExtensionHandlers(ipcMain, IPC);
   setupPluginHandlers(ipcMain, IPC);
   setupLanguageHandlers(ipcMain, IPC);
+  setupToolHandlers(ipcMain, IPC);
 }
 
 module.exports = { registerIpcHandlers };

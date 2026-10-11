@@ -16,4 +16,6 @@ export const firebaseConfig = {
 
 // Only needed if Firestore was created as a named database instead of
 // "(default)" — see the Firebase console's Firestore database list.
-export const FIRESTORE_DATABASE_ID = '(default)';
+// MulTeam has its own named database in the shared Firebase project
+// (firebase.json deploys its rules there too).
+export const FIRESTORE_DATABASE_ID = 'multeam';

@@ -97,7 +97,7 @@ function compact(n) {
   return n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : String(n);
 }
 
-export function initExtensions({ toast, confirmDialog, pick, onIconThemeChange = () => {} }) {
+export function initExtensions({ toast, confirmDialog, pick, onIconThemeChange = () => {}, onTabChange = () => {} }) {
   const api = window.electronAPI?.extensions;
   const input = document.getElementById('extSearch');
   const listEl = document.getElementById('extList');
@@ -107,7 +107,13 @@ export function initExtensions({ toast, confirmDialog, pick, onIconThemeChange =
   let activeIcon = null; // { t, def } of the applied icon theme
 
   let installed = [];
-  let category = 'Themes';
+  // Tabs: Themes/Snippets/All browse Open VSX; Languages/Formatters show the
+  // language-support catalog (languageSupport.js); Installed shows everything
+  // installed. The search box searches Open VSX or filters the local lists.
+  const MARKET_TABS = ['Themes', 'Snippets', 'All'];
+  let tab = 'Themes';
+  const isMarket = () => MARKET_TABS.includes(tab);
+  const category = () => (isMarket() ? tab : 'All');
   let results = [];
   let seq = 0;
   let timer = null;
@@ -334,7 +340,7 @@ export function initExtensions({ toast, confirmDialog, pick, onIconThemeChange =
     listEl.dataset.loading = '1';
     render();
     try {
-      const r = await api.search({ query: input.value.trim(), category });
+      const r = await api.search({ query: input.value.trim(), category: category() });
       if (mySeq !== seq) return;
       results = r;
     } catch (err) {
@@ -377,15 +383,18 @@ export function initExtensions({ toast, confirmDialog, pick, onIconThemeChange =
     if (!listEl) return;
     const q = input.value.trim();
     let html = '';
-    if (!q && installed.length) {
-      html += `<div class="ext__section">Installed <span class="scm__count">${installed.length}</span></div>`;
-      html += installed.map((e) => card(e, true)).join('');
+    if (tab === 'Installed') {
+      const ql = q.toLowerCase();
+      const mine = installed.filter((e) => !ql || `${e.displayName} ${e.description} ${e.id}`.toLowerCase().includes(ql));
+      html += `<div class="ext__section">VS Code extensions <span class="scm__count">${mine.length}</span><span class="ext__src">Open VSX</span></div>`;
+      html += mine.length ? mine.map((e) => card(e, true)).join('') : `<p class="scm__empty">${installed.length ? 'Nothing matches.' : 'No themes, icon themes or snippets installed yet — browse the Themes tab.'}</p>`;
+    } else if (isMarket()) {
+      html += `<div class="ext__section">${q ? 'Results' : `Popular ${tab === 'All' ? 'extensions' : tab.toLowerCase()}`} <span class="ext__src">Open VSX</span></div>`;
+      if (listEl.dataset.loading) html += '<div class="bounce-loader"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>';
+      else if (listEl.dataset.error) html += `<p class="scm__empty error">${escapeHtml(listEl.dataset.error)}</p>`;
+      else if (!results.length) html += '<p class="scm__empty">No extensions found.</p>';
+      else html += results.map((e) => card(e, false)).join('');
     }
-    html += `<div class="ext__section">${q ? 'Results' : `Popular ${category === 'All' ? 'extensions' : category.toLowerCase()}`} <span class="ext__src">Open VSX</span></div>`;
-    if (listEl.dataset.loading) html += '<div class="bounce-loader"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>';
-    else if (listEl.dataset.error) html += `<p class="scm__empty error">${escapeHtml(listEl.dataset.error)}</p>`;
-    else if (!results.length) html += '<p class="scm__empty">No extensions found.</p>';
-    else html += results.map((e) => card(e, false)).join('');
     listEl.innerHTML = html;
 
     // local icons for installed extensions (stored on disk, served as data URLs)
@@ -443,13 +452,24 @@ export function initExtensions({ toast, confirmDialog, pick, onIconThemeChange =
     if (th) openThemePicker(th.dataset.extTheme);
   });
 
-  input?.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(runSearch, 350); });
+  const PLACEHOLDER = { Languages: 'Filter languages', Formatters: 'Filter formatters & linters', Installed: 'Filter installed' };
+  function setTab(next) {
+    tab = next;
+    filterEl.querySelectorAll('[data-tab]').forEach((x) => x.classList.toggle('is-on', x.dataset.tab === tab));
+    input.placeholder = PLACEHOLDER[tab] || `Search Open VSX ${tab === 'All' ? 'extensions' : tab.toLowerCase()}`;
+    listEl.hidden = !(isMarket() || tab === 'Installed');
+    onTabChange(tab, input.value.trim());
+    if (isMarket()) runSearch(); else render();
+  }
+
+  input?.addEventListener('input', () => {
+    clearTimeout(timer);
+    if (isMarket()) timer = setTimeout(runSearch, 350);
+    else { render(); onTabChange(tab, input.value.trim()); }
+  });
   filterEl?.addEventListener('click', (e) => {
-    const b = e.target.closest('[data-cat]');
-    if (!b) return;
-    category = b.dataset.cat;
-    filterEl.querySelectorAll('[data-cat]').forEach((x) => x.classList.toggle('is-on', x === b));
-    runSearch();
+    const b = e.target.closest('[data-tab]');
+    if (b && b.dataset.tab !== tab) setTab(b.dataset.tab);
   });
 
   // ---------- boot ----------
@@ -462,7 +482,8 @@ export function initExtensions({ toast, confirmDialog, pick, onIconThemeChange =
   });
 
   return {
-    onShow() { if (!searchedOnce) { searchedOnce = true; runSearch(); } setTimeout(() => input?.focus(), 120); },
+    onShow() { if (!searchedOnce) { searchedOnce = true; setTab(tab); } setTimeout(() => input?.focus(), 120); },
+    showTab: (name) => setTab(name),
     openThemePicker: () => openThemePicker(),
     openIconThemePicker: () => openIconThemePicker(),
     reload: reloadInstalled

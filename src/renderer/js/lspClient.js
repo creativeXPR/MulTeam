@@ -35,8 +35,8 @@ function markdownOf(content) {
 }
 
 export class LspClient {
-  constructor({ id, name, languages, rootPath, initializationOptions, api, onState, onDiagnosticsChange }) {
-    Object.assign(this, { id, name, languages, rootPath, initializationOptions, api, onState, onDiagnosticsChange });
+  constructor({ id, name, languages, rootPath, initializationOptions, api, onState, onDiagnosticsChange, shouldFormat = () => true }) {
+    Object.assign(this, { id, name, languages, rootPath, initializationOptions, api, onState, onDiagnosticsChange, shouldFormat });
     this.seq = 0;
     this.pending = new Map();
     this.docs = new Map();        // uriKey -> { model, version, sub }
@@ -107,6 +107,7 @@ export class LspClient {
           hover: { contentFormat: ['markdown', 'plaintext'] },
           signatureHelp: { signatureInformation: { documentationFormat: ['markdown', 'plaintext'], parameterInformation: { labelOffsetSupport: true } } },
           definition: { linkSupport: false },
+          formatting: { dynamicRegistration: false },
           publishDiagnostics: { relatedInformation: false }
         }
       }
@@ -229,6 +230,13 @@ export class LspClient {
           provideSignatureHelp: (model, position) => this.signatureHelp(model, position)
         }));
       }
+      // formatting from the server unless a dedicated formatter (Prettier/Ruff) covers the language
+      if (caps.documentFormattingProvider && this.shouldFormat(lang)) {
+        this.disposables.push(monaco.languages.registerDocumentFormattingEditProvider(lang, {
+          displayName: this.name,
+          provideDocumentFormattingEdits: (model, options) => this.formatting(model, options)
+        }));
+      }
       if (caps.definitionProvider) {
         this.disposables.push(monaco.languages.registerDefinitionProvider(lang, { provideDefinition: (model, position) => this.definition(model, position) }));
       }
@@ -315,6 +323,18 @@ export class LspClient {
         dispose() {}
       };
     } catch { return null; }
+  }
+
+  async formatting(model, options) {
+    if (!this.handles(model)) return [];
+    this.sync(model);
+    try {
+      const edits = await this.request('textDocument/formatting', {
+        textDocument: { uri: model.uri.toString() },
+        options: { tabSize: options.tabSize, insertSpaces: options.insertSpaces }
+      }, 15000);
+      return (edits || []).map((e) => ({ range: toRange(e.range), text: e.newText }));
+    } catch { return []; }
   }
 
   async definition(model, position) {

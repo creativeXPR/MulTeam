@@ -115,7 +115,9 @@ function safeRelative(rel) {
   return norm;
 }
 
-export function initPluginHost({ app, toast, confirmDialog, promptDialog, commands }) {
+// `space` (pluginSpace.js) owns the plugin pane: it handles creating from a
+// template and gallery publish/unpublish, and may add buttons to each card.
+export function initPluginHost({ app, toast, confirmDialog, promptDialog, commands, space = {} }) {
   const api = window.electronAPI?.plugins;
   const listEl = document.getElementById('pluginList');
   const statusHost = document.getElementById('pluginStatus');
@@ -294,19 +296,23 @@ export function initPluginHost({ app, toast, confirmDialog, promptDialog, comman
     render();
   }
 
-  // ---------- UI (Extensions view section) ----------
+  // ---------- UI (Plugins pane → Installed) ----------
+  let filter = '';
   function render() {
     if (!listEl) return;
-    const head = `<div class="ext__section">MulTeam plugins <span class="scm__count">${plugins.length}</span>
-      <span class="plugin__headacts">
-        <button type="button" class="chipbtn" data-plugin-act="create">Create…</button>
-        <button type="button" class="chipbtn" data-plugin-act="install">Install from folder…</button>
-      </span></div>`;
+    const head = `<div class="ext__section">Installed <span class="scm__count">${plugins.length}</span></div>
+      <div class="plugin__bar">
+        <button type="button" class="chipbtn" data-plugin-act="create">New from template</button>
+        <button type="button" class="chipbtn" data-plugin-act="install-package" title="Install a .mtplugin file">Install .mtplugin</button>
+        <button type="button" class="chipbtn" data-plugin-act="install" title="Install from a plugin folder">From folder</button>
+      </div>`;
+    const q = filter.toLowerCase();
+    const shown = plugins.filter((p) => !q || `${p.name} ${p.description} ${p.id}`.toLowerCase().includes(q));
     if (!plugins.length) {
-      listEl.innerHTML = `${head}<p class="scm__empty">No plugins yet. "Create…" writes a working example you can edit.</p>`;
+      listEl.innerHTML = `${head}<p class="scm__empty">No plugins yet. Start from a template (Templates tab), get one from the Gallery, or install a .mtplugin file.</p>`;
       return;
     }
-    listEl.innerHTML = head + plugins.map((p) => {
+    listEl.innerHTML = head + (shown.length ? '' : '<p class="scm__empty">Nothing matches.</p>') + shown.map((p) => {
       const err = p.error || runtimeErrors.get(p.id);
       const live = running.has(p.id);
       return `<div class="ext plugin ${p.enabled ? '' : 'is-off'}">
@@ -321,6 +327,9 @@ export function initPluginHost({ app, toast, confirmDialog, promptDialog, comman
           <div class="ext__acts">
             <button type="button" class="chipbtn" data-plugin-act="reload" data-id="${escapeHtml(p.id)}" ${p.enabled ? '' : 'disabled'}>Reload</button>
             <button type="button" class="chipbtn" data-plugin-act="folder" data-id="${escapeHtml(p.id)}">Open folder</button>
+            <button type="button" class="chipbtn" data-plugin-act="export" data-id="${escapeHtml(p.id)}" ${p.error ? 'disabled' : ''}>Export</button>
+            ${p.error ? '' : `<button type="button" class="chipbtn" data-plugin-act="publish" data-id="${escapeHtml(p.id)}">Publish…</button>`}
+            ${space.isPublishedByMe?.(p.id) ? `<button type="button" class="chipbtn danger" data-plugin-act="unpublish" data-id="${escapeHtml(p.id)}">Unpublish</button>` : ''}
             <button type="button" class="chipbtn danger" data-plugin-act="uninstall" data-id="${escapeHtml(p.id)}">Uninstall</button>
           </div>
         </div>
@@ -342,21 +351,25 @@ export function initPluginHost({ app, toast, confirmDialog, promptDialog, comman
       if (!btn) return;
       const act = btn.dataset.pluginAct;
       const p = plugins.find((x) => x.id === btn.dataset.id);
-      if (act === 'create') {
-        const name = await promptDialog({ title: 'Create plugin', label: 'Plugin name', placeholder: 'My Plugin', confirmLabel: 'Create' });
-        if (!name) return;
-        const made = await api.scaffold(name);
-        await loadAll();
-        toast(`Created ${made.id} — "Open folder" to edit main.js, then press Reload`);
-      }
+      if (act === 'create') return space.onCreate?.();
       if (act === 'install') {
         const installed = await api.installFromFolder();
         if (installed) { await loadAll(); toast(`Installed ${installed.name}`); }
       }
+      if (act === 'install-package') {
+        const installed = await api.installPackage();
+        if (installed) { await loadAll(); toast(`Installed ${installed.name} ${installed.version}`); }
+      }
       if (act === 'reload' && p) { await api.list().then((l) => { plugins = l; }); const fresh = plugins.find((x) => x.id === p.id); if (fresh && !fresh.error) await start(fresh); render(); toast(`${p.name} reloaded`); }
       if (act === 'folder' && p) await api.openFolder(p.id);
+      if (act === 'export' && p) {
+        const file = await api.exportPackage(p.id);
+        if (file) toast(`Exported ${file.split(/[\\/]/).pop()}`);
+      }
+      if (act === 'publish' && p) await space.onPublish?.(p);
+      if (act === 'unpublish' && p) await space.onUnpublish?.(p);
       if (act === 'uninstall' && p) {
-        const ok = await confirmDialog({ title: `Uninstall ${p.name}?`, message: 'The plugin and its folder are deleted. This can’t be undone.', confirmLabel: 'Uninstall', danger: true });
+        const ok = await confirmDialog({ title: `Uninstall ${p.name}?`, message: 'The plugin and its folder are deleted from this computer. This can’t be undone.', confirmLabel: 'Uninstall', danger: true });
         if (!ok) return;
         stop(p.id);
         await api.uninstall(p.id);
@@ -373,6 +386,9 @@ export function initPluginHost({ app, toast, confirmDialog, promptDialog, comman
   return {
     emit(event, data) { for (const rt of running.values()) rt.worker.postMessage({ t: 'event', ev: event, data }); },
     reloadAll: loadAll,
-    runningCount: () => running.size
+    runningCount: () => running.size,
+    installed: () => plugins,
+    setFilter(q) { filter = q || ''; render(); },
+    rerender: () => render()
   };
 }

@@ -77,7 +77,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     installFromFolder: () => ipcRenderer.invoke(IPC.PLUGIN_INSTALL_FOLDER),
     uninstall: (id) => ipcRenderer.invoke(IPC.PLUGIN_UNINSTALL, id),
     setEnabled: (id, enabled) => ipcRenderer.invoke(IPC.PLUGIN_SET_ENABLED, id, enabled),
-    scaffold: (name) => ipcRenderer.invoke(IPC.PLUGIN_SCAFFOLD, name),
+    scaffold: (name, templateId) => ipcRenderer.invoke(IPC.PLUGIN_SCAFFOLD, name, templateId),
+    templates: () => ipcRenderer.invoke(IPC.PLUGIN_TEMPLATES),
+    exportPackage: (id) => ipcRenderer.invoke(IPC.PLUGIN_EXPORT, id),
+    installPackage: () => ipcRenderer.invoke(IPC.PLUGIN_INSTALL_PACKAGE),
+    pack: (id) => ipcRenderer.invoke(IPC.PLUGIN_PACK, id),
+    installFromGallery: (base64, sha256) => ipcRenderer.invoke(IPC.PLUGIN_INSTALL_GALLERY, base64, sha256),
     openFolder: (id) => ipcRenderer.invoke(IPC.PLUGIN_OPEN_FOLDER, id)
   },
 
@@ -92,6 +97,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onMessage: (cb) => { const h = (_e, id, msg) => cb(id, msg); ipcRenderer.on(IPC.LSP_MESSAGE, h); return () => ipcRenderer.removeListener(IPC.LSP_MESSAGE, h); },
     onExit: (cb) => { const h = (_e, id, code, log) => cb(id, code, log); ipcRenderer.on(IPC.LSP_EXIT, h); return () => ipcRenderer.removeListener(IPC.LSP_EXIT, h); },
     onProgress: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on(IPC.LSP_PROGRESS, h); return () => ipcRenderer.removeListener(IPC.LSP_PROGRESS, h); }
+  },
+
+  // Formatters / linters (Prettier, Ruff, the project's ESLint)
+  tools: {
+    format: (id, filePath, text, root) => ipcRenderer.invoke(IPC.TOOL_FORMAT, id, filePath, text, root),
+    lint: (id, filePath, text, root) => ipcRenderer.invoke(IPC.TOOL_LINT, id, filePath, text, root),
+    hasEslint: (filePath, root) => ipcRenderer.invoke(IPC.TOOL_HAS_ESLINT, filePath, root)
   },
 
   // Integrated terminal (node-pty in the main process)

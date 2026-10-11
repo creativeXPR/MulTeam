@@ -14,7 +14,15 @@ import {
   doc,
   setDoc,
   getDoc,
+  getDocs,
   deleteDoc,
+  updateDoc,
+  collection,
+  query,
+  orderBy,
+  limit,
+  writeBatch,
+  increment,
   serverTimestamp
 } from 'firebase/firestore';
 import { getDatabase, ref, onValue } from 'firebase/database';
@@ -115,4 +123,74 @@ export async function upsertDocumentMeta(docId, { projectId, ownerId, path, lang
     { projectId, ownerId, path, language, lastSavedBy: userId, updatedAt: serverTimestamp() },
     { merge: true }
   );
+}
+
+// ------------------------------------------------------------------
+// Plugin gallery (Firestore, MulTeam's own database)
+//   pluginGallery/{pluginId}                  listing — public to read
+//   pluginGallery/{pluginId}/versions/{ver}   the .mtplugin (base64) + sha256,
+//                                             immutable once published
+// Only the first publisher of an id may publish new versions of it. Authors
+// are shown by display name only (never email).
+// ------------------------------------------------------------------
+const GALLERY = 'pluginGallery';
+
+export async function galleryList(max = 60) {
+  const snap = await getDocs(query(collection(firestore, GALLERY), orderBy('downloads', 'desc'), limit(max)));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+export async function galleryVersion(pluginId, version) {
+  const snap = await getDoc(doc(firestore, GALLERY, pluginId, 'versions', version));
+  if (!snap.exists()) throw new Error('That version is no longer in the gallery.');
+  return snap.data();
+}
+
+export async function galleryPublish({ manifest, base64, sha256, size, changelog = '' }) {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sign in to publish plugins.');
+  const ref = doc(firestore, GALLERY, manifest.id);
+  const existing = await getDoc(ref);
+  if (existing.exists() && existing.data().authorUid !== user.uid) {
+    throw new Error(`The id "${manifest.id}" already belongs to another publisher — change "id" in multeam-plugin.json.`);
+  }
+  const vref = doc(firestore, GALLERY, manifest.id, 'versions', manifest.version);
+  if ((await getDoc(vref)).exists()) {
+    throw new Error(`Version ${manifest.version} is already published — raise "version" in multeam-plugin.json first.`);
+  }
+  const batch = writeBatch(firestore);
+  batch.set(ref, {
+    name: manifest.name,
+    description: manifest.description || '',
+    authorUid: user.uid,
+    authorName: user.displayName || 'MulTeam publisher',
+    latestVersion: manifest.version,
+    permissions: manifest.permissions || [],
+    size,
+    downloads: existing.exists() ? existing.data().downloads || 0 : 0,
+    createdAt: existing.exists() ? existing.data().createdAt : serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+  batch.set(vref, {
+    version: manifest.version,
+    permissions: manifest.permissions || [],
+    size,
+    sha256,
+    package: base64,
+    changelog: String(changelog).slice(0, 2000),
+    publishedAt: serverTimestamp()
+  });
+  await batch.commit();
+}
+
+export async function galleryCountDownload(pluginId) {
+  try { await updateDoc(doc(firestore, GALLERY, pluginId), { downloads: increment(1) }); } catch { /* counting is best-effort */ }
+}
+
+export async function galleryUnpublish(pluginId) {
+  const versions = await getDocs(collection(firestore, GALLERY, pluginId, 'versions'));
+  const batch = writeBatch(firestore);
+  versions.docs.forEach((v) => batch.delete(v.ref));
+  batch.delete(doc(firestore, GALLERY, pluginId));
+  await batch.commit();
 }

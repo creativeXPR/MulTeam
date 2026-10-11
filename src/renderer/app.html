@@ -65,6 +65,9 @@
             <button class="ibtn" data-side="ext" title="Extensions (Ctrl Shift X)">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"><rect x="3.5" y="3.5" width="7" height="7" rx="2" /><rect x="13.5" y="3.5" width="7" height="7" rx="2" /><rect x="3.5" y="13.5" width="7" height="7" rx="2" /><path d="M17 13.5v7M13.5 17h7" /></svg>
             </button>
+            <button class="ibtn" data-side="plugins" title="Plugins">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v4M15 3v4" /><path d="M6 7h12v4a6 6 0 0 1-12 0z" /><path d="M12 17v4" /></svg>
+            </button>
             <button class="ibtn" data-action="help" title="Help">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M9.5 9a2.5 2.5 0 0 1 4.9.8c0 1.7-2.4 2-2.4 3.7" /><path d="M12 17.2v.1" /></svg>
             </button>
@@ -134,6 +137,26 @@
               <div class="scm__body" id="scmBody"></div>
             </div>
 
+            <!-- MulTeam plugins: Installed · Gallery · Templates · Learn -->
+            <div class="sidepane" data-sidepane="plugins" hidden>
+              <div class="sidelist__head static">Plugins</div>
+              <div class="fsearch">
+                <div class="ext__tabs" id="pluginTabs" role="tablist">
+                  <button type="button" role="tab" data-ptab2="installed" class="is-on">Installed</button>
+                  <button type="button" role="tab" data-ptab2="gallery">Gallery</button>
+                  <button type="button" role="tab" data-ptab2="templates">Templates</button>
+                  <button type="button" role="tab" data-ptab2="learn">Learn</button>
+                </div>
+                <div class="fsearch__field" style="margin-top:8px"><input type="text" id="pluginSearch" placeholder="Filter installed plugins" spellcheck="false" autocomplete="off" /></div>
+              </div>
+              <div class="ext__list">
+                <div id="pluginList"></div>
+                <div id="pluginGallery" hidden></div>
+                <div id="pluginTemplates" hidden></div>
+                <div id="pluginLearn" hidden></div>
+              </div>
+            </div>
+
             <!-- extensions (Ctrl+Shift+X) -->
             <div class="sidepane" data-sidepane="ext" hidden>
               <div class="sidelist__head static">Extensions</div>
@@ -141,15 +164,17 @@
                 <div class="fsearch__field">
                   <input type="text" id="extSearch" placeholder="Search Open VSX" spellcheck="false" autocomplete="off" />
                 </div>
-                <div class="seg ext__filter" id="extFilter">
-                  <button type="button" data-cat="Themes" class="is-on">Themes</button>
-                  <button type="button" data-cat="Snippets">Snippets</button>
-                  <button type="button" data-cat="All">All</button>
+                <div class="ext__tabs" id="extFilter" role="tablist">
+                  <button type="button" role="tab" data-tab="Themes" class="is-on">Themes</button>
+                  <button type="button" role="tab" data-tab="Snippets">Snippets</button>
+                  <button type="button" role="tab" data-tab="All">All</button>
+                  <button type="button" role="tab" data-tab="Languages">Languages</button>
+                  <button type="button" role="tab" data-tab="Formatters">Formatters</button>
+                  <button type="button" role="tab" data-tab="Installed">Installed</button>
                 </div>
               </div>
               <div class="ext__list">
                 <div id="langList"></div>
-                <div id="pluginList"></div>
                 <div id="extList"></div>
               </div>
             </div>
@@ -216,6 +241,123 @@
               </label>
             </div>
             <div class="projects" id="projects"></div>
+          </section>
+
+
+          <!-- ===== PLUGIN TUTORIAL ===== -->
+          <section class="view scroll tutorial" id="view-tutorial" hidden>
+            <header class="vhead">
+              <div>
+                <h2>Build a MulTeam plugin</h2>
+                <p>About 10 minutes · from a template to the gallery</p>
+              </div>
+              <button class="pillbtn" data-tutorial="templates">Open templates</button>
+            </header>
+
+            <nav class="tutorial__toc">
+              <a href="#t-what">1 What a plugin is</a><a href="#t-create">2 Create one</a><a href="#t-files">3 The files</a>
+              <a href="#t-api">4 The API</a><a href="#t-perms">5 Permissions</a><a href="#t-test">6 Test &amp; debug</a>
+              <a href="#t-share">7 Package &amp; share</a><a href="#t-publish">8 Publish</a><a href="#t-update">9 Updates</a>
+            </nav>
+
+            <article class="tutorial__body">
+              <h3 id="t-what">1 · What a plugin is</h3>
+              <p>A MulTeam plugin is a small JavaScript program that adds features to the editor: palette commands, a status item in the footer, autocomplete suggestions, tools that rewrite code or create files, and reactions to opening or saving files.</p>
+              <p>Plugins run in a <b>sandbox</b> (a Web Worker). They can't touch the app, your disk or the network directly. Everything goes through the <code>multeam</code> API, and anything sensitive needs a <b>permission</b> that you see before installing.</p>
+              <p class="tutorial__note">Themes, icon themes, snippets and language support come from VS Code extensions (Extensions view). Plugins are for everything else, especially features unique to MulTeam.</p>
+
+              <h3 id="t-create">2 · Create one from a template</h3>
+              <ol>
+                <li>Open <b>Plugins</b> in the sidebar (the plug icon), then the <b>Templates</b> tab.</li>
+                <li>Pick a template, such as <b>Hello command</b>, and press <b>Use template</b>.</li>
+                <li>Give it a name. It's created and starts running straight away; you'll find it under <b>Installed</b>.</li>
+                <li>Press <b>Ctrl+K</b> and type “Say hello” to try it.</li>
+              </ol>
+
+              <h3 id="t-files">3 · The files</h3>
+              <p>Press <b>Open folder</b> on the plugin's card. Inside:</p>
+              <pre><code>multeam-plugin.json   the manifest
+main.js               your code
+README.md             notes for users</code></pre>
+              <p>The manifest describes the plugin:</p>
+              <pre><code>{
+  "id": "word-tools",            // lowercase, digits, dashes — unique in the gallery
+  "name": "Word Tools",
+  "version": "0.1.0",            // raise it for every published update
+  "description": "Handy text commands",
+  "main": "main.js",
+  "permissions": ["editor"]
+}</code></pre>
+
+              <h3 id="t-api">4 · The API</h3>
+              <p>Everything is on the global <code>multeam</code> object. Calls that talk to the app return promises, so <code>await</code> them.</p>
+              <pre><code>// commands — shown in Ctrl+K as "Plugin name: title"
+multeam.commands.register('upper', 'UPPERCASE selection', async () =&gt; {
+  const text = await multeam.editor.getSelectedText();
+  if (!text) return multeam.window.showError('Select some text first.');
+  await multeam.editor.replaceSelection(text.toUpperCase());
+});
+
+// window
+multeam.window.showMessage('Done!');
+const name = await multeam.window.showInput({ title: 'Rename', label: 'New name' }); // string | null
+multeam.window.setStatus('3 TODOs');          // footer text; '' hides it
+
+// editor (needs "editor")
+await multeam.editor.getText();               // null when no file is open
+await multeam.editor.insertText('// hi');
+await multeam.editor.getFile();               // { path, language }
+
+// workspace (needs "workspace.read" / "workspace.write")
+await multeam.workspace.listFiles();          // paths relative to the project
+await multeam.workspace.readFile('package.json');
+await multeam.workspace.writeFile('notes.md', '# Notes');
+
+// completions — type the label in a file of that language
+multeam.languages.registerCompletions('python', () =&gt; [
+  { label: 'main', insertText: 'if __name__ == "__main__":\n\t${1:main()}', detail: 'main guard' }
+]);
+
+// events
+multeam.on('open', ({ path, language }) =&gt; {});
+multeam.on('save', ({ path }) =&gt; {});</code></pre>
+
+              <h3 id="t-perms">5 · Permissions</h3>
+              <table class="tutorial__table">
+                <tr><th>Permission</th><th>Unlocks</th></tr>
+                <tr><td><code>editor</code></td><td>Reading and changing the open file</td></tr>
+                <tr><td><code>workspace.read</code></td><td>Listing and reading project files</td></tr>
+                <tr><td><code>workspace.write</code></td><td>Creating and changing project files</td></tr>
+              </table>
+              <p>Commands, messages, input prompts, the status item, completions and events need no permission. Ask only for what you use: people see the list before installing, and an update that adds permissions asks them again.</p>
+
+              <h3 id="t-test">6 · Test &amp; debug</h3>
+              <ul>
+                <li>Edit <code>main.js</code> in any editor (MulTeam included) and press <b>Reload</b> on the card. Changes apply immediately.</li>
+                <li>If the plugin crashes, the card shows the error <b>with the line number</b> in your <code>main.js</code>.</li>
+                <li>Calling an API without its permission gives a clear error naming the permission to add.</li>
+                <li>Use the switch on the card to disable a plugin without uninstalling it.</li>
+              </ul>
+
+              <h3 id="t-share">7 · Package &amp; share</h3>
+              <p><b>Export</b> on the card saves a single <code>.mtplugin</code> file (a zip of the plugin folder, up to 700 KB). Send it to anyone, and they install it with <b>Installed → .mtplugin…</b></p>
+
+              <h3 id="t-publish">8 · Publish to the gallery</h3>
+              <ol>
+                <li>Sign in (your avatar, top right).</li>
+                <li>Press <b>Publish…</b> on the plugin's card, check the summary, and add an optional changelog.</li>
+                <li>It appears in <b>Plugins → Gallery</b> for every MulTeam user, under your display name (never your email).</li>
+              </ol>
+              <p class="tutorial__note">The first person to publish an id owns it, so only you can publish new versions of your plugin. Published versions can't be changed.</p>
+
+              <h3 id="t-update">9 · Ship updates</h3>
+              <p>Raise <code>version</code> in the manifest (for example <code>0.1.0</code> → <code>0.2.0</code>), test with Reload, then <b>Publish…</b> again. Users see <b>Update to 0.2.0</b> in the Gallery. Changed your mind? <b>Unpublish</b> removes it from the gallery, and people who installed it keep their copy.</p>
+
+              <div class="tutorial__end">
+                <button class="pillbtn is-primary" data-tutorial="templates">Start from a template</button>
+                <button class="pillbtn" data-tutorial="gallery">Browse the gallery</button>
+              </div>
+            </article>
           </section>
 
           <!-- ===== EDITOR VIEW ===== -->
@@ -410,6 +552,10 @@
             <div class="set-row__txt"><b>Autosave</b><span>Save 800 ms after you stop typing</span></div>
             <div class="set-row__ctl"><button class="toggle is-on" id="toggleAutosave"></button></div>
           </div>
+          <div class="set-row">
+            <div class="set-row__txt"><b>Format on save</b><span>When you press Ctrl+S (not on autosave)</span></div>
+            <div class="set-row__ctl"><button class="toggle" id="toggleFormatOnSave"></button></div>
+          </div>
         </div>
       </div>
     </div>
@@ -552,8 +698,9 @@
           <li><b>Ctrl+P</b> — open any file in the project by typing part of its name (type <b>&gt;</b> for commands).</li>
           <li><b>Ctrl+Shift+F</b> — search text across every file in the project; click a result to jump to it.</li>
           <li><b>Language support</b> — Extensions view → Language support → Install (JavaScript/TypeScript, Python, C/C++, PHP, Java, C#). Downloads the language server once (Java uses your Java 21+ if you have it; C# needs the .NET SDK); then IntelliSense, go to definition (F12) and real errors work. The footer shows its status.</li>
+          <li><b>Formatting</b> — Shift+Alt+F (Edit → Format Document). Install Prettier / Ruff under Extensions → Formatters &amp; linters; C/C++, Java, PHP and C# use their language server. Turn on <b>Format on save</b> in Settings.</li>
           <li><b>Ctrl+Shift+X</b> — Extensions: install color themes, file icon themes and snippets from Open VSX. Switch with <b>View → Color Theme…</b> / <b>File Icon Theme…</b>.</li>
-          <li><b>Plugins</b> — Extensions view → MulTeam plugins → <b>Create…</b> writes a working example (commands, a status item, completions). Edit its main.js and press Reload.</li>
+          <li><b>Plugins</b> — the plug icon in the sidebar: install from the Gallery, start from a Template, or read the tutorial (Help → Plugin Tutorial).</li>
           <li><b>Ctrl+Shift+G</b> — Source Control: stage, commit, pull and push. Click the branch name in the footer to switch or create branches.</li>
           <li><b>Ctrl+J</b> — show or hide the bottom panel. Click the ⊗ / ⚠ counts in the footer to jump to Problems.</li>
           <li><b>Ctrl+`</b> — open the terminal in the current project's folder. Use + for more, and pick PowerShell, Command Prompt or Git Bash.</li>

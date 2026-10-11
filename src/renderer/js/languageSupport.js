@@ -26,7 +26,7 @@ function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-export function initLanguageSupport({ toast, confirmDialog, getRoot, getActiveModel, openFileAt, showExtensions }) {
+export function initLanguageSupport({ toast, confirmDialog, getRoot, getActiveModel, openFileAt, showExtensions, onCatalogChange = () => {}, lspShouldFormat = () => true }) {
   const api = window.electronAPI?.languages;
   const listEl = document.getElementById('langList');
   const statusEl = document.getElementById('langStatus');
@@ -38,7 +38,8 @@ export function initLanguageSupport({ toast, confirmDialog, getRoot, getActiveMo
   const crashed = new Map();     // id -> log tail
   let clientRoot = null;
 
-  const entryForLang = (lang) => catalog.find((c) => c.languages.includes(lang));
+  // language servers only — formatter/linter tools share the catalog but never start as servers
+  const entryForLang = (lang) => catalog.find((c) => c.kind === 'server' && c.languages.includes(lang));
 
   // ---------- servers ----------
   // Every start/stop request goes through one queue: two quick calls (e.g.
@@ -64,7 +65,7 @@ export function initLanguageSupport({ toast, confirmDialog, getRoot, getActiveMo
       const info = await api.start(entry.id, root);
       const client = new LspClient({
         id: entry.id, name: entry.name, languages: info.languages, rootPath: root,
-        initializationOptions: info.initializationOptions, api,
+        initializationOptions: info.initializationOptions, api, shouldFormat: lspShouldFormat,
         onState: () => paintStatus()
       });
       clients.set(entry.id, client);
@@ -143,7 +144,7 @@ export function initLanguageSupport({ toast, confirmDialog, getRoot, getActiveMo
       await api.install(id);
       progress.delete(id);
       await reload();
-      toast(`${entry.name} support installed`);
+      toast(entry.kind === 'tool' ? `${entry.name} installed` : `${entry.name} support installed`);
       if (id === 'typescript') offerReloadForTs();
       const model = getActiveModel();
       if (model && entry.languages.includes(model.getLanguageId())) ensureFor(model.getLanguageId());
@@ -157,8 +158,8 @@ export function initLanguageSupport({ toast, confirmDialog, getRoot, getActiveMo
   async function uninstall(id) {
     const entry = catalog.find((c) => c.id === id);
     const ok = await confirmDialog({
-      title: `Uninstall ${entry.name} support?`,
-      message: 'The language server is removed from this computer. You can reinstall it any time.',
+      title: entry.kind === 'tool' ? `Uninstall ${entry.name}?` : `Uninstall ${entry.name} support?`,
+      message: entry.kind === 'tool' ? 'The formatter is removed from this computer. You can reinstall it any time.' : 'The language server is removed from this computer. You can reinstall it any time.',
       confirmLabel: 'Uninstall',
       danger: true
     });
@@ -174,6 +175,7 @@ export function initLanguageSupport({ toast, confirmDialog, getRoot, getActiveMo
     catalog = api ? await api.list() : [];
     const tsInstalled = !!catalog.find((c) => c.id === 'typescript')?.installed;
     try { localStorage.setItem(TS_LSP_FLAG, tsInstalled ? '1' : ''); } catch { /* non-fatal */ }
+    onCatalogChange(catalog);
     render();
     paintStatus();
     return tsInstalled;
@@ -195,29 +197,49 @@ export function initLanguageSupport({ toast, confirmDialog, getRoot, getActiveMo
   }
 
   // ---------- UI ----------
+  function card(c) {
+    const isTool = c.kind === 'tool';
+    const prog = progress.get(c.id);
+    const running = clients.has(c.id);
+    const err = crashed.get(c.id);
+    let actions;
+    if (prog) actions = `<div class="lang__bar"><span style="width:${Math.max(4, prog.pct)}%"></span></div><span class="ext__busy">${escapeHtml(prog.detail || prog.phase)}</span>`;
+    else if (!c.installed) actions = `<button type="button" class="chipbtn is-primary" data-lang-install="${c.id}">Install</button>`;
+    else actions = `${!isTool && running ? '<span class="plugin__live">● running</span>' : ''}
+      ${isTool ? '' : `<button type="button" class="chipbtn" data-lang-restart="${c.id}">${running ? 'Restart' : 'Start'}</button>`}
+      <button type="button" class="chipbtn danger" data-lang-uninstall="${c.id}">Uninstall</button>`;
+    const badge = c.installed ? (c.variant === 'bundled-runtime' ? 'installed · own Java' : c.variant === 'system-runtime' ? 'installed · your Java' : 'installed') : `~${c.approxMB} MB`;
+    return `<div class="ext">
+      <div class="ext__media"><span class="ext__ic lang__ic">${isTool ? '¶' : '{ }'}</span></div>
+      <div class="ext__info">
+        <div class="ext__top"><b>${escapeHtml(c.name)}</b><span class="ext__dl">${badge}</span></div>
+        <div class="ext__desc">${escapeHtml(c.description)}</div>
+        <div class="ext__meta">${c.source.map((p) => `<span class="perm">${escapeHtml(p)}</span>`).join('')}</div>
+        ${err ? `<div class="plugin__err">${escapeHtml(err.slice(-400))}</div>` : ''}
+        <div class="ext__acts">${actions}</div>
+      </div>
+    </div>`;
+  }
+
+  // view: which tab of the Extensions view is showing (set by extensions.js)
+  let view = { mode: 'hidden', query: '' };
   function render() {
     if (!listEl) return;
-    listEl.innerHTML = `<div class="ext__section">Language support <span class="ext__src">language servers</span></div>` + catalog.map((c) => {
-      const prog = progress.get(c.id);
-      const running = clients.has(c.id);
-      const err = crashed.get(c.id);
-      let actions;
-      if (prog) actions = `<div class="lang__bar"><span style="width:${Math.max(4, prog.pct)}%"></span></div><span class="ext__busy">${escapeHtml(prog.detail || prog.phase)}</span>`;
-      else if (!c.installed) actions = `<button type="button" class="chipbtn is-primary" data-lang-install="${c.id}">Install</button>`;
-      else actions = `${running ? '<span class="plugin__live">● running</span>' : ''}
-        <button type="button" class="chipbtn" data-lang-restart="${c.id}">${running ? 'Restart' : 'Start'}</button>
-        <button type="button" class="chipbtn danger" data-lang-uninstall="${c.id}">Uninstall</button>`;
-      return `<div class="ext">
-        <div class="ext__media"><span class="ext__ic lang__ic">{ }</span></div>
-        <div class="ext__info">
-          <div class="ext__top"><b>${escapeHtml(c.name)}</b><span class="ext__dl">${c.installed ? (c.variant === 'bundled-runtime' ? 'installed · own Java' : c.variant === 'system-runtime' ? 'installed · your Java' : 'installed') : `~${c.approxMB} MB`}</span></div>
-          <div class="ext__desc">${escapeHtml(c.description)}</div>
-          <div class="ext__meta">${c.source.map((p) => `<span class="perm">${escapeHtml(p)}</span>`).join('')}</div>
-          ${err ? `<div class="plugin__err">${escapeHtml(err.slice(-400))}</div>` : ''}
-          <div class="ext__acts">${actions}</div>
-        </div>
-      </div>`;
-    }).join('');
+    listEl.hidden = view.mode === 'hidden';
+    if (view.mode === 'hidden') return;
+    const q = view.query.toLowerCase();
+    const match = (c) => !q || `${c.name} ${c.description} ${c.languages.join(' ')}`.toLowerCase().includes(q);
+    const servers = catalog.filter((c) => c.kind !== 'tool' && match(c));
+    const toolsList = catalog.filter((c) => c.kind === 'tool' && match(c));
+    const section = (title, note, items, empty) => `<div class="ext__section">${title} <span class="ext__src">${note}</span></div>` +
+      (items.length ? items.map(card).join('') : `<p class="scm__empty">${empty}</p>`);
+    if (view.mode === 'servers') listEl.innerHTML = section('Language support', 'language servers', servers, 'Nothing matches.');
+    else if (view.mode === 'tools') listEl.innerHTML = section('Formatters &amp; linters', 'ESLint uses each project’s own', toolsList, 'Nothing matches.');
+    else if (view.mode === 'installed') {
+      listEl.innerHTML =
+        section('Language support', 'installed', servers.filter((c) => c.installed || progress.has(c.id)), 'No language support installed yet — see the Languages tab.') +
+        section('Formatters &amp; linters', 'installed', toolsList.filter((c) => c.installed || progress.has(c.id)), 'No formatters installed yet — see the Formatters tab.');
+    }
   }
 
   listEl?.addEventListener('click', (e) => {
@@ -273,6 +295,10 @@ export function initLanguageSupport({ toast, confirmDialog, getRoot, getActiveMo
     onFileOpened(model) { if (model) ensureFor(model.getLanguageId()); paintStatus(); },
     onFileSaved(model) { for (const c of clients.values()) c.didSave(model); },
     onProjectClosed() { clientRoot = null; queue = queue.then(() => stopAll()).catch(() => {}); },
-    refreshStatus: paintStatus
+    refreshStatus: paintStatus,
+    setView(tabName, query = '') {
+      view = { mode: { Languages: 'servers', Formatters: 'tools', Installed: 'installed' }[tabName] || 'hidden', query };
+      render();
+    }
   };
 }
