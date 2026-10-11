@@ -210,9 +210,9 @@ export function initLanguageSupport({ toast, confirmDialog, getRoot, getActiveMo
       return `<div class="ext">
         <div class="ext__media"><span class="ext__ic lang__ic">{ }</span></div>
         <div class="ext__info">
-          <div class="ext__top"><b>${escapeHtml(c.name)}</b><span class="ext__dl">${c.installed ? 'installed' : 'on demand'}</span></div>
+          <div class="ext__top"><b>${escapeHtml(c.name)}</b><span class="ext__dl">${c.installed ? (c.variant === 'bundled-runtime' ? 'installed · own Java' : c.variant === 'system-runtime' ? 'installed · your Java' : 'installed') : `~${c.approxMB} MB`}</span></div>
           <div class="ext__desc">${escapeHtml(c.description)}</div>
-          <div class="ext__meta">${c.packages.map((p) => `<span class="perm">${escapeHtml(p)}</span>`).join('')}</div>
+          <div class="ext__meta">${c.source.map((p) => `<span class="perm">${escapeHtml(p)}</span>`).join('')}</div>
           ${err ? `<div class="plugin__err">${escapeHtml(err.slice(-400))}</div>` : ''}
           <div class="ext__acts">${actions}</div>
         </div>

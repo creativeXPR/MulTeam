@@ -137,14 +137,6 @@ export function watchMarkers(callback) {
 
 export const MarkerSeverity = monaco.MarkerSeverity;
 
-function languageFromPath(filePath) {
-  const ext = filePath.split('.').pop();
-  const map = {
-    js: 'javascript', jsx: 'javascript', ts: 'typescript', tsx: 'typescript',
-    json: 'json', html: 'html', css: 'css', md: 'markdown', py: 'python'
-  };
-  return map[ext] || 'plaintext';
-}
 
 export class CollaborativeWorkspace {
   constructor(containerElement, { docId, filePath, currentUser, collaborative = true }) {
@@ -173,7 +165,7 @@ export class CollaborativeWorkspace {
       // Purely local (non-cloud) projects never touch Yjs/Firebase at all —
       // just a plain Monaco editor seeded straight from disk content.
       this.collaborative ? '' : initialContent,
-      languageFromPath(this.filePath),
+      undefined, // let Monaco pick the language from the extension (~80 built in: php, java, cs, cpp, go, rust…)
       uri
     );
 
