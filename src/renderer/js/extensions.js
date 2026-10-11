@@ -4,7 +4,7 @@
 // process (main/extensions.js).
 import * as monaco from 'monaco-editor';
 import { setCustomEditorTheme, setMonacoTheme } from './editor.js';
-import { getTheme } from './theme.js';
+import { getTheme, getEffectiveTheme, setAppPalette, clearAppPalette, hasAppPalette } from './theme.js';
 import { getSettings, updateSettings } from './settings.js';
 import { setIconTheme } from './icons.js';
 
@@ -89,6 +89,53 @@ export function toMonacoTheme(vs, uiTheme) {
   return { base, inherit: true, rules, colors };
 }
 
+// Maps a VS Code theme's workbench colors onto MulTeam's design tokens so a
+// color theme restyles the whole app, not just the editor.
+export function toAppPalette(vs, uiTheme) {
+  const type = vs.type || (uiTheme === 'vs' ? 'light' : uiTheme === 'hc-black' ? 'hc' : 'dark');
+  const mode = type === 'light' ? 'light' : 'dark';
+  const c = vs.colors || {};
+  const pick = (...keys) => { for (const k of keys) { const h = normalizeHex(c[k]); if (h) return `#${h}`; } return null; };
+  const solid = (hex) => hex.slice(0, 7);
+  const alpha = (hex, a) => `${solid(hex)}${Math.round(a * 255).toString(16).padStart(2, '0')}`;
+  const bg = solid(pick('editor.background', 'sideBar.background') || (mode === 'dark' ? '#1e1e1e' : '#ffffff'));
+  const fg = solid(pick('foreground', 'editor.foreground', 'sideBar.foreground') || (mode === 'dark' ? '#cccccc' : '#333333'));
+  // Accent = the theme's most vivid "brand" color. Many themes use a grey
+  // button.background, which would make selection/active states vanish.
+  const saturation = (hex) => {
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    return max === 0 ? 0 : (max - min) / max;
+  };
+  const accentCandidates = ['activityBarBadge.background', 'progressBar.background', 'textLink.foreground', 'focusBorder',
+    'tab.activeBorderTop', 'tab.activeBorder', 'button.background', 'statusBarItem.remoteBackground', 'editorCursor.foreground']
+    .map((k) => pick(k)).filter(Boolean).map(solid);
+  const accent = accentCandidates.find((h) => saturation(h) >= 0.35) || accentCandidates[0] || '#6d4aff';
+  return {
+    mode,
+    accent,
+    vars: {
+      '--bg': bg,
+      '--surface': pick('editorWidget.background', 'dropdown.background', 'menu.background', 'quickInput.background', 'sideBar.background') || bg,
+      '--line': pick('panel.border', 'editorGroup.border', 'sideBar.border', 'widget.border', 'contrastBorder') || alpha(fg, 0.14),
+      '--line-soft': alpha(fg, 0.07),
+      '--fill': pick('list.hoverBackground') || alpha(fg, 0.07),
+      '--fill-2': pick('list.inactiveSelectionBackground', 'list.activeSelectionBackground') || alpha(fg, 0.12),
+      '--text': fg,
+      '--text-2': alpha(fg, 0.8),
+      '--muted': pick('descriptionForeground') || alpha(fg, 0.55),
+      '--danger': pick('errorForeground', 'editorError.foreground') || '#e14b63',
+      '--warn': pick('editorWarning.foreground', 'list.warningForeground') || '#e08a2b',
+      '--success': pick('gitDecoration.addedResourceForeground', 'terminal.ansiGreen') || '#12b76a',
+      '--scrim': mode === 'dark' ? '#00000080' : '#00000033',
+      '--shadow': mode === 'dark' ? '0 0 10px #00000040' : '0 0 10px #00000008',
+      '--shadow-float': mode === 'dark' ? '0 16px 40px -12px #000000b3' : '0 12px 32px -12px #00000026'
+    },
+    titleBar: { color: bg, symbolColor: fg }
+  };
+}
+
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -119,6 +166,7 @@ export function initExtensions({ toast, confirmDialog, pick, onIconThemeChange =
   let timer = null;
   const busy = new Set();               // ids being installed/removed
   const definedThemes = new Set();      // monaco theme names already defined
+  const themeData = new Map();          // theme key -> VS Code theme JSON
   const snippetsByLang = new Map();     // monaco lang -> [{prefix, body, name, description, source}]
   const providers = new Map();          // monaco lang -> disposable
 
@@ -134,6 +182,7 @@ export function initExtensions({ toast, confirmDialog, pick, onIconThemeChange =
     const name = monacoName(t.key);
     if (definedThemes.has(name)) return name;
     const vs = await api.readTheme(t.extId, t.path);
+    themeData.set(t.key, vs);
     monaco.editor.defineTheme(name, toMonacoTheme(vs, t.uiTheme));
     definedThemes.add(name);
     return name;
@@ -145,12 +194,16 @@ export function initExtensions({ toast, confirmDialog, pick, onIconThemeChange =
     if (key && !t) key = ''; // theme's extension was uninstalled
     try {
       setCustomEditorTheme(t ? await ensureThemeDefined(t) : null);
+      // the whole app follows the color theme, not just the editor
+      if (t) setAppPalette(toAppPalette(themeData.get(t.key) || {}, t.uiTheme), { persist });
+      else if (hasAppPalette()) clearAppPalette({ persist });
     } catch (err) {
       toast(`Couldn't load that theme: ${String(err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')}`, 'error');
       setCustomEditorTheme(null);
+      if (hasAppPalette()) clearAppPalette({ persist });
       key = '';
     }
-    setMonacoTheme(getTheme());
+    setMonacoTheme(getEffectiveTheme());
     if (persist) {
       updateSettings({ editorTheme: key });
       if (themeSelect) themeSelect.value = key;
@@ -160,7 +213,7 @@ export function initExtensions({ toast, confirmDialog, pick, onIconThemeChange =
   function paintThemeOptions() {
     if (!themeSelect) return;
     const current = getSettings().editorTheme || '';
-    themeSelect.innerHTML = '<option value="">MulTeam (follows app theme)</option>' +
+    themeSelect.innerHTML = '<option value="">MulTeam (light / dark)</option>' +
       allThemes().map((t) => `<option value="${escapeHtml(t.key)}">${escapeHtml(t.label)}</option>`).join('');
     themeSelect.value = allThemes().some((t) => t.key === current) ? current : '';
   }
@@ -170,7 +223,7 @@ export function initExtensions({ toast, confirmDialog, pick, onIconThemeChange =
     const themes = allThemes().filter((t) => !onlyExtId || t.extId === onlyExtId);
     const before = getSettings().editorTheme || '';
     const items = [
-      ...(onlyExtId ? [] : [{ label: 'MulTeam (follows app theme)', detail: 'built-in', value: '' }]),
+      ...(onlyExtId ? [] : [{ label: 'MulTeam (light / dark)', detail: 'built-in', value: '' }]),
       ...themes.map((t) => ({ label: t.label, detail: `${t.extName} · ${t.uiTheme === 'vs' ? 'light' : 'dark'}`, value: t.key }))
     ];
     if (!items.length) { toast('Install a theme from the Extensions view first', 'error'); return; }
@@ -193,7 +246,7 @@ export function initExtensions({ toast, confirmDialog, pick, onIconThemeChange =
   // The theme's `light` section overrides entries while the app is light.
   function resolveIconTheme(t, def) {
     const dir = posixDir(t.path.replace(/^\.\//, ''));
-    const light = getTheme() === 'light' && def.light ? def.light : null;
+    const light = getEffectiveTheme() === 'light' && def.light ? def.light : null;
     const merged = (k) => ({ ...(def[k] || {}), ...((light && light[k]) || {}) });
     const lower = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k.toLowerCase(), v]));
     const extToLang = {};
@@ -485,6 +538,8 @@ export function initExtensions({ toast, confirmDialog, pick, onIconThemeChange =
     onShow() { if (!searchedOnce) { searchedOnce = true; setTab(tab); } setTimeout(() => input?.focus(), 120); },
     showTab: (name) => setTab(name),
     openThemePicker: () => openThemePicker(),
+    // the light/dark switch means "MulTeam's own look": drop any color theme
+    async resetColorTheme() { if (hasAppPalette() || getSettings().editorTheme) { await applyEditorTheme(''); return true; } return false; },
     openIconThemePicker: () => openIconThemePicker(),
     reload: reloadInstalled
   };

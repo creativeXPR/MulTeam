@@ -7,7 +7,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Theme last saved by the main process (window-state.json).
   savedTheme: themeArg ? themeArg.split('=')[1] : null,
   getAppVersion: () => ipcRenderer.invoke(IPC.GET_APP_VERSION),
-  setTitleBarTheme: (theme) => ipcRenderer.invoke(IPC.SET_TITLEBAR_THEME, theme),
+  setTitleBarTheme: (theme, custom) => ipcRenderer.invoke(IPC.SET_TITLEBAR_THEME, theme, custom || null),
   zoom: (action) => ipcRenderer.invoke(IPC.WINDOW_ZOOM, action),
 
   // Filesystem

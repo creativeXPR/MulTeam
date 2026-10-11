@@ -2,7 +2,7 @@ import { watchAuthState, watchCloudConnection, signOut, createCloudProject, dele
 import { requireAuth, openSignIn } from './authModal.js';
 import { CollaborativeWorkspace, setMonacoTheme } from './editor.js';
 import { PresenceBar } from './presence.js';
-import { applyStoredTheme, setTheme, getTheme, setAccent, getAccent } from './theme.js';
+import { applyStoredTheme, setTheme, getTheme, getEffectiveTheme, setAccent, getAccent } from './theme.js';
 import { getSettings, updateSettings, monacoOptionsFromSettings } from './settings.js';
 import { initCommandPalette } from './commandPalette.js';
 import { initBottomPanel } from './panel.js';
@@ -1161,12 +1161,15 @@ setInterval(() => { if (currentView === 'dashboard') renderDashboardCards(); }, 
 /* ============================================================
    Theme + settings panel
    ============================================================ */
-document.getElementById('themeBtn').addEventListener('click', () => applyTheme(getTheme() === 'dark' ? 'light' : 'dark'));
-document.querySelectorAll('[data-theme-set]').forEach((b) => b.addEventListener('click', () => applyTheme(b.dataset.themeSet)));
+document.getElementById('themeBtn').addEventListener('click', () => applyTheme(getEffectiveTheme() === 'dark' ? 'light' : 'dark', { user: true }));
+document.querySelectorAll('[data-theme-set]').forEach((b) => b.addEventListener('click', () => applyTheme(b.dataset.themeSet, { user: true })));
 
-function applyTheme(t) {
+// `user` = the person chose light/dark (switch, settings, menu). That means
+// MulTeam's own look, so an installed color theme is turned off first.
+async function applyTheme(t, { user = false } = {}) {
+  if (user && await extensions.resetColorTheme()) toast('Switched back to the MulTeam theme');
   setTheme(t);
-  setMonacoTheme(t);
+  setMonacoTheme(getEffectiveTheme());
   document.querySelectorAll('[data-theme-set]').forEach((b) => b.classList.toggle('is-on', b.dataset.themeSet === t));
 }
 applyTheme(getTheme());
@@ -1372,7 +1375,7 @@ const palette = initCommandPalette({
   onOpenFile: (path) => openFile(path),
   commands: paletteCommands = [
     { label: 'New project', action: () => openProjectModal('create', null) },
-    { label: 'Toggle theme', action: () => applyTheme(getTheme() === 'dark' ? 'light' : 'dark') },
+    { label: 'Toggle theme', action: () => applyTheme(getEffectiveTheme() === 'dark' ? 'light' : 'dark', { user: true }) },
     { label: 'Open settings', action: () => openSettings() },
     { label: 'Toggle panel', hint: 'Ctrl+J', action: () => toggleProblems() },
     { label: 'Toggle terminal', hint: 'Ctrl+`', action: () => toggleTerminal() },
@@ -1571,7 +1574,7 @@ initMenubar(document.getElementById('menubar'), [
     { label: 'Color Theme…', run: () => extensions.openThemePicker() },
     { label: 'File Icon Theme…', run: () => extensions.openIconThemePicker() },
     { label: 'Toggle Minimap', run: () => toggleMinimap() },
-    { label: 'Toggle Theme', run: () => applyTheme(getTheme() === 'dark' ? 'light' : 'dark') }
+    { label: 'Toggle Theme', run: () => applyTheme(getEffectiveTheme() === 'dark' ? 'light' : 'dark', { user: true }) }
   ] },
   { label: 'Go', items: [
     { label: 'Go to File…', kbd: 'Ctrl+P', run: () => openQuickOpen() },

@@ -21,6 +21,7 @@ const ZOOM_STEP = 0.5;
 const stateFile = () => path.join(app.getPath('userData'), 'window-state.json');
 
 let currentTheme = 'light';
+let customOverlay = null; // { color, symbolColor } from an active color theme
 
 function readState() {
   try { return JSON.parse(fs.readFileSync(stateFile(), 'utf8')); } catch { return {}; }
@@ -38,9 +39,18 @@ function titleBarOverlayFor(theme, zoomFactor = 1) {
     writeState({ theme }); // so the next launch opens in the right colors
   }
   return {
-    ...(TITLEBAR_COLORS[currentTheme] || TITLEBAR_COLORS.light),
+    ...(customOverlay || TITLEBAR_COLORS[currentTheme] || TITLEBAR_COLORS.light),
     height: Math.round(TITLEBAR_HEIGHT * zoomFactor)
   };
+}
+
+// A color theme's own title-bar colors (null = MulTeam's light/dark pair).
+const HEX = /^#[0-9a-f]{6}([0-9a-f]{2})?$/i;
+function setCustomOverlay(custom) {
+  customOverlay = custom && HEX.test(custom.color) && HEX.test(custom.symbolColor)
+    ? { color: custom.color.slice(0, 7), symbolColor: custom.symbolColor.slice(0, 7) }
+    : null;
+  writeState({ customOverlay });
 }
 
 function applyZoom(win, level) {
@@ -82,13 +92,14 @@ async function createMainWindow() {
   // Start in the last-used theme so the frame/background don't flash light
   // before the renderer applies its stored theme.
   currentTheme = TITLEBAR_COLORS[readState().theme] ? readState().theme : 'light';
+  customOverlay = readState().customOverlay || null;
 
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 900,
     minHeight: 600,
-    backgroundColor: TITLEBAR_COLORS[currentTheme].color,
+    backgroundColor: (customOverlay || TITLEBAR_COLORS[currentTheme]).color,
     // Generated from public/logo-1024.png by `npm run icons`.
     icon: path.join(__dirname, '..', 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
     titleBarStyle: 'hidden',
@@ -115,4 +126,4 @@ async function createMainWindow() {
   return win;
 }
 
-module.exports = { createMainWindow, titleBarOverlayFor, zoom };
+module.exports = { createMainWindow, titleBarOverlayFor, setCustomOverlay, zoom };

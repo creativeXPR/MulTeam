@@ -9,15 +9,16 @@ const { setupExtensionHandlers } = require('./extensions');
 const { setupPluginHandlers } = require('./plugins');
 const { setupLanguageHandlers } = require('./languages');
 const { setupToolHandlers } = require('./tools');
-const { titleBarOverlayFor, zoom } = require('./window');
+const { titleBarOverlayFor, setCustomOverlay, zoom } = require('./window');
 
 function registerIpcHandlers(ipcMain) {
   ipcMain.handle(IPC.GET_APP_VERSION, () => app.getVersion());
 
   // Re-tints the native window controls (min/max/close) drawn over the
   // custom title bar so they follow the app's light/dark theme.
-  ipcMain.handle(IPC.SET_TITLEBAR_THEME, (event, theme) => {
+  ipcMain.handle(IPC.SET_TITLEBAR_THEME, (event, theme, custom) => {
     const win = BrowserWindow.fromWebContents(event.sender);
+    setCustomOverlay(custom || null);
     if (!win || process.platform === 'darwin') return;
     win.setTitleBarOverlay(titleBarOverlayFor(theme, win.webContents.getZoomFactor()));
   });
