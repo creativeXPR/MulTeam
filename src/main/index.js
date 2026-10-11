@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, Menu, session } = require('electron');
 const { createMainWindow } = require('./window');
 const { registerIpcHandlers } = require('./ipcHandlers');
 const { killAllTerminals } = require('./terminal');
+const { stopAllLanguageServers } = require('./languages');
 
 // One running copy only (like VS Code). A second copy couldn't get the
 // renderer's fixed port, would land on a different origin, and so would see
@@ -33,6 +34,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('before-quit', () => {
     killAllTerminals();
+    stopAllLanguageServers();
     // Chromium commits localStorage lazily; without this, a setting changed
     // just before quitting (theme, editor theme, panel sizes…) can be lost.
     session.defaultSession.flushStorageData();

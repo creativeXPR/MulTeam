@@ -16,6 +16,15 @@ import { monacoOptionsFromSettings } from './settings.js';
 let themesDefined = false;
 let languagesConfigured = false;
 
+// Monaco's TypeScript mode reads its feature switches only once, when it
+// first loads. When the JS/TS language server is installed (flag cached by
+// languageSupport.js), the built-in completions/hovers/definitions are
+// turned off up front so nothing is offered twice.
+export const TS_LSP_FLAG = 'multeam:tsLanguageServer';
+const TS_SERVER_FEATURES = ['completionItems', 'hovers', 'definitions', 'references', 'rename', 'diagnostics', 'signatureHelp', 'codeActions', 'inlayHints'];
+let builtinTsAtBoot = true;
+export function builtinTsEnabledAtBoot() { return builtinTsAtBoot; }
+
 // One-time TS/JS language-service setup. Each open file is checked on its
 // own (only one model is alive at a time), so "Cannot find module" for
 // relative imports would be pure noise and is suppressed.
@@ -24,6 +33,17 @@ function configureLanguages() {
   languagesConfigured = true;
 
   const ts = monaco.languages.typescript;
+  let useServer = false;
+  try { useServer = localStorage.getItem(TS_LSP_FLAG) === '1'; } catch { /* default: built-in */ }
+  if (useServer) {
+    builtinTsAtBoot = false;
+    const cfg = {
+      documentSymbols: true, documentHighlights: true, documentRangeFormattingEdits: true, onTypeFormattingEdits: true,
+      ...Object.fromEntries(TS_SERVER_FEATURES.map((f) => [f, false]))
+    };
+    ts.typescriptDefaults.setModeConfiguration(cfg);
+    ts.javascriptDefaults.setModeConfiguration(cfg);
+  }
   const compilerOptions = {
     target: ts.ScriptTarget.ESNext,
     module: ts.ModuleKind.ESNext,

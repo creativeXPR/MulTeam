@@ -511,6 +511,14 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 13p
 .chipbtn.is-primary:hover { filter: brightness(1.08); background: var(--violet-500); }
 .chipbtn.danger:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); background: color-mix(in srgb, var(--danger) 8%, transparent); }
 
+/* ===== language support ===== */
+.lang__ic { font: 600 12px/1 var(--mono); color: var(--violet-500); background: color-mix(in srgb, var(--violet-500) 12%, transparent); }
+.lang__bar { flex: 1; height: 4px; border-radius: 4px; background: var(--fill-2); overflow: hidden; align-self: center; max-width: 120px; }
+.lang__bar span { display: block; height: 100%; background: var(--violet-500); transition: width .2s; }
+.lang-status.is-cta { color: var(--violet-500); }
+.lang-status.is-ok { color: var(--text-2); }
+.lang-status.is-error { color: var(--danger); }
+
 /* ===== plugins ===== */
 .plugin__headacts { margin-left: auto; display: flex; gap: 4px; text-transform: none; letter-spacing: 0; font-weight: 500; }
 .plugin__headacts .chipbtn { font-size: 10.5px; padding: 1px 8px; }

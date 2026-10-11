@@ -81,6 +81,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openFolder: (id) => ipcRenderer.invoke(IPC.PLUGIN_OPEN_FOLDER, id)
   },
 
+  // Language support: language servers installed on demand, LSP over IPC
+  languages: {
+    list: () => ipcRenderer.invoke(IPC.LSP_LIST),
+    install: (id) => ipcRenderer.invoke(IPC.LSP_INSTALL, id),
+    uninstall: (id) => ipcRenderer.invoke(IPC.LSP_UNINSTALL, id),
+    start: (id, rootPath) => ipcRenderer.invoke(IPC.LSP_START, id, rootPath),
+    stop: (id) => ipcRenderer.invoke(IPC.LSP_STOP, id),
+    send: (id, msg) => ipcRenderer.send(IPC.LSP_SEND, id, msg),
+    onMessage: (cb) => { const h = (_e, id, msg) => cb(id, msg); ipcRenderer.on(IPC.LSP_MESSAGE, h); return () => ipcRenderer.removeListener(IPC.LSP_MESSAGE, h); },
+    onExit: (cb) => { const h = (_e, id, code, log) => cb(id, code, log); ipcRenderer.on(IPC.LSP_EXIT, h); return () => ipcRenderer.removeListener(IPC.LSP_EXIT, h); },
+    onProgress: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on(IPC.LSP_PROGRESS, h); return () => ipcRenderer.removeListener(IPC.LSP_PROGRESS, h); }
+  },
+
   // Integrated terminal (node-pty in the main process)
   terminal: {
     listShells: () => ipcRenderer.invoke(IPC.TERM_SHELLS),

@@ -148,6 +148,7 @@
                 </div>
               </div>
               <div class="ext__list">
+                <div id="langList"></div>
                 <div id="pluginList"></div>
                 <div id="extList"></div>
               </div>
@@ -276,6 +277,7 @@
       <div class="box mini subtle">
         <span id="line-count">—</span>
         <span id="char-count">—</span>
+        <button type="button" class="footbtn lang-status" id="langStatus" hidden></button>
         <span class="plugin-statuses" id="pluginStatus"></span>
         <button class="ibtn notifbtn" id="notifBtn" title="Notifications" aria-haspopup="true" aria-expanded="false">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15Z" /><path d="M10 20.5a2 2 0 0 0 4 0" /></svg>
@@ -549,6 +551,7 @@
           <li><b>Ctrl+K</b> — jump to any project, open file, or app command.</li>
           <li><b>Ctrl+P</b> — open any file in the project by typing part of its name (type <b>&gt;</b> for commands).</li>
           <li><b>Ctrl+Shift+F</b> — search text across every file in the project; click a result to jump to it.</li>
+          <li><b>Language support</b> — Extensions view → Language support → Install (JavaScript/TypeScript, Python). Downloads the language server once; then IntelliSense, go to definition (F12) and real errors work. The footer shows its status.</li>
           <li><b>Ctrl+Shift+X</b> — Extensions: install color themes, file icon themes and snippets from Open VSX. Switch with <b>View → Color Theme…</b> / <b>File Icon Theme…</b>.</li>
           <li><b>Plugins</b> — Extensions view → MulTeam plugins → <b>Create…</b> writes a working example (commands, a status item, completions). Edit its main.js and press Reload.</li>
           <li><b>Ctrl+Shift+G</b> — Source Control: stage, commit, pull and push. Click the branch name in the footer to switch or create branches.</li>

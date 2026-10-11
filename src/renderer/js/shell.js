@@ -15,6 +15,7 @@ import { initScm } from './scm.js';
 import { initSidebarResize } from './sidebarResize.js';
 import { initExtensions } from './extensions.js';
 import { initPluginHost } from './pluginHost.js';
+import { initLanguageSupport } from './languageSupport.js';
 import {
   fileIconSvg, folderIconSvg, chevronSvg, colorForExtension,
   saveIconSvg, trashIconSvg,
@@ -579,6 +580,7 @@ async function openProjectView(p) {
 
 function closeProjectView() {
   if (rootFolder) window.electronAPI.unwatchPath(rootFolder).catch(() => {});
+  languageSupport.onProjectClosed();
   selectedTreePath = null;
   selectedDir = null;
   document.getElementById('explorerActs').hidden = true;
@@ -810,6 +812,7 @@ function teardownActiveWorkspace() {
   activeTabPath = null;
   editorContainerEl.innerHTML = ''; // shows the :empty hint
   updateFileMeta();
+  languageSupport?.refreshStatus();
 }
 
 function activateTab(filePath) {
@@ -852,6 +855,7 @@ async function activateTabInner(filePath) {
   updateFileMeta();
 
   pluginHost.emit('open', { path: filePath, language: activeWorkspace.languageId() });
+  languageSupport.onFileOpened(activeWorkspace.editor.getModel());
 
   if (pendingReveal && samePath(pendingReveal.path, filePath)) {
     activeWorkspace.revealPosition(pendingReveal.line, pendingReveal.column, pendingReveal.length);
@@ -872,6 +876,7 @@ function saveActiveFile(filePath) {
   window.electronAPI.writeFile(filePath, activeWorkspace.getValue()).then(() => {
     scm.refreshSoon();
     pluginHost.emit('save', { path: filePath });
+    if (activeWorkspace && activeTabPath === filePath) languageSupport.onFileSaved(activeWorkspace.editor.getModel());
   });
 }
 
@@ -1580,6 +1585,15 @@ const extensions = initExtensions({
     renderTabs();
     scm.refresh();
   }
+});
+
+const languageSupport = initLanguageSupport({
+  toast,
+  confirmDialog,
+  getRoot: () => rootFolder,
+  getActiveModel: () => (activeWorkspace ? activeWorkspace.editor.getModel() : null),
+  openFileAt: (filePath, line, column) => openFileAt(filePath, line, column),
+  showExtensions: () => showSide('ext')
 });
 
 // What plugins may touch (each call is permission-checked in pluginHost.js).
