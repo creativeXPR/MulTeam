@@ -114,3 +114,42 @@ export function chevronDownIconSvg() {
     <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>`;
 }
+
+// ------------------------------------------------------------------
+// File icon themes (VS Code iconTheme format, installed from Open VSX).
+// extensions.js builds a resolved theme and passes it to setIconTheme();
+// fileIcon()/folderIcon() fall back to the built-in glyphs when no theme
+// is active or the theme has no icon for that entry.
+// ------------------------------------------------------------------
+let iconTheme = null; // { url(id) -> string|null, file, folder, folderExpanded, fileNames, fileExtensions, folderNames, folderNamesExpanded, languageIds, extToLang }
+
+export function setIconTheme(theme) { iconTheme = theme; }
+export function hasIconTheme() { return !!iconTheme; }
+
+function img(id) {
+  const url = id && iconTheme.url(id);
+  return url ? `<img class="ti" src="${url}" alt="" draggable="false" />` : null;
+}
+
+export function fileIcon(name) {
+  const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
+  if (!iconTheme) return fileIconSvg(colorForExtension(ext));
+  const t = iconTheme;
+  const lower = name.toLowerCase();
+  let id = t.fileNames[lower] || t.fileNames[name];
+  if (!id) {
+    // longest compound extension first: "a.test.ts" -> "test.ts" -> "ts"
+    const parts = lower.split('.');
+    for (let i = 1; i < parts.length && !id; i++) id = t.fileExtensions[parts.slice(i).join('.')];
+  }
+  if (!id && ext && t.extToLang[ext]) id = t.languageIds[t.extToLang[ext]];
+  return img(id) || img(t.file) || fileIconSvg(colorForExtension(ext));
+}
+
+export function folderIcon(name, open = false) {
+  if (!iconTheme) return folderIconSvg(open);
+  const t = iconTheme;
+  const lower = String(name).toLowerCase();
+  const id = open ? (t.folderNamesExpanded[lower] || t.folderExpanded || t.folder) : (t.folderNames[lower] || t.folder);
+  return img(id) || folderIconSvg(open);
+}

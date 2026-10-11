@@ -20,17 +20,25 @@ const MIME_TYPES = {
   '.map': 'application/json',
   '.png': 'image/png',
   '.svg': 'image/svg+xml',
+  '.jpg': 'image/jpeg',
+  '.gif': 'image/gif',
   '.ico': 'image/x-icon'
 };
 
-function startRendererServer(rootDir) {
+// `mounts` maps a URL prefix to an extra folder, e.g. installed extensions'
+// icon files at /ext-assets/<id>/... (read-only, same path-escape guard).
+function startRendererServer(rootDir, mounts = {}) {
   return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
       const urlPath = decodeURIComponent(req.url.split('?')[0]);
-      const relativePath = urlPath === '/' ? 'app.html' : urlPath.replace(/^\/+/, '');
-      const filePath = path.normalize(path.join(rootDir, relativePath));
+      let base = rootDir;
+      let relativePath = urlPath === '/' ? 'app.html' : urlPath.replace(/^\/+/, '');
+      for (const [prefix, dir] of Object.entries(mounts)) {
+        if (urlPath.startsWith(`/${prefix}/`)) { base = dir; relativePath = urlPath.slice(prefix.length + 2); break; }
+      }
+      const filePath = path.normalize(path.join(base, relativePath));
 
-      if (!filePath.startsWith(rootDir)) {
+      if (!filePath.startsWith(base)) {
         res.writeHead(403);
         res.end();
         return;

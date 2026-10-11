@@ -74,7 +74,9 @@ function wireZoomShortcuts(win) {
 
 async function createMainWindow() {
   const rendererRoot = path.join(__dirname, '..', 'renderer');
-  const server = await startRendererServer(rendererRoot);
+  const server = await startRendererServer(rendererRoot, {
+    'ext-assets': path.join(app.getPath('userData'), 'extensions')
+  });
   const { port } = server.address();
 
   // Start in the last-used theme so the frame/background don't flash light

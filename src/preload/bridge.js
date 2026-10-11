@@ -66,7 +66,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     list: () => ipcRenderer.invoke(IPC.EXT_LIST),
     readTheme: (id, relPath) => ipcRenderer.invoke(IPC.EXT_READ_THEME, id, relPath),
     readSnippets: (id, relPath) => ipcRenderer.invoke(IPC.EXT_READ_SNIPPETS, id, relPath),
+    readJson: (id, relPath) => ipcRenderer.invoke(IPC.EXT_READ_SNIPPETS, id, relPath), // any JSON(C) contribution
     icon: (id) => ipcRenderer.invoke(IPC.EXT_ICON, id)
+  },
+
+  // MulTeam plugins (storage side — code runs in a sandboxed worker)
+  plugins: {
+    list: () => ipcRenderer.invoke(IPC.PLUGIN_LIST),
+    code: (id) => ipcRenderer.invoke(IPC.PLUGIN_CODE, id),
+    installFromFolder: () => ipcRenderer.invoke(IPC.PLUGIN_INSTALL_FOLDER),
+    uninstall: (id) => ipcRenderer.invoke(IPC.PLUGIN_UNINSTALL, id),
+    setEnabled: (id, enabled) => ipcRenderer.invoke(IPC.PLUGIN_SET_ENABLED, id, enabled),
+    scaffold: (name) => ipcRenderer.invoke(IPC.PLUGIN_SCAFFOLD, name),
+    openFolder: (id) => ipcRenderer.invoke(IPC.PLUGIN_OPEN_FOLDER, id)
   },
 
   // Integrated terminal (node-pty in the main process)

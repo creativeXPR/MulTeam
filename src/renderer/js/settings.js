@@ -11,7 +11,8 @@ const DEFAULTS = {
   ligatures: true,
   minimap: true,
   autosave: true,
-  editorTheme: '' // '' = MulTeam default; else '<extensionId>::<theme label>'
+  editorTheme: '', // '' = MulTeam default; else '<extensionId>::<theme label>'
+  iconTheme: ''    // '' = built-in icons;  else '<extensionId>::<icon theme id>'
 };
 
 let current = null;

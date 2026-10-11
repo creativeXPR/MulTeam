@@ -1,7 +1,7 @@
 // Find in files (Ctrl+Shift+F): the sidebar's Search pane. Queries run in
 // the main process (main/search.js); results are grouped by file and each
 // hit jumps to its line/column in the editor.
-import { fileIconSvg, colorForExtension, chevronSvg } from './icons.js';
+import { fileIcon, chevronSvg } from './icons.js';
 
 const OPTS_KEY = 'multeam:searchOptions';
 
@@ -72,7 +72,7 @@ export function initSearchView({ getRoot, onOpenMatch }) {
       return `<div class="fsearch__group">
         <button type="button" class="fsearch__file" data-toggle="${fi}">
           <span class="chev">${chevronSvg()}</span>
-          <span class="node-icon">${fileIconSvg(colorForExtension(name.split('.').pop()))}</span>
+          <span class="node-icon">${fileIcon(name)}</span>
           <span class="name">${escapeHtml(name)}</span>
           <span class="dir">${escapeHtml(dir)}</span>
           <span class="count">${f.matches.length}</span>

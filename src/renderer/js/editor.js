@@ -201,6 +201,31 @@ export class CollaborativeWorkspace {
     this.editor.focus();
   }
 
+  // full (possibly multi-line) selection — used by the plugin API
+  selectionText() {
+    const sel = this.editor?.getSelection();
+    return sel ? this.editor.getModel().getValueInRange(sel) : '';
+  }
+
+  replaceSelection(text) {
+    if (!this.editor) return;
+    this.editor.pushUndoStop();
+    this.editor.executeEdits('plugin', [{ range: this.editor.getSelection(), text, forceMoveMarkers: true }]);
+    this.editor.pushUndoStop();
+  }
+
+  insertText(text) {
+    if (!this.editor) return;
+    const p = this.editor.getPosition();
+    this.editor.pushUndoStop();
+    this.editor.executeEdits('plugin', [{ range: new monaco.Range(p.lineNumber, p.column, p.lineNumber, p.column), text, forceMoveMarkers: true }]);
+    this.editor.pushUndoStop();
+  }
+
+  languageId() {
+    return this.editor ? this.editor.getModel().getLanguageId() : null;
+  }
+
   selectedText() {
     if (!this.editor) return '';
     const sel = this.editor.getSelection();

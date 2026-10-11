@@ -52,7 +52,7 @@
             <button class="ibtn is-on" data-nav="dashboard" title="Dashboard">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5" /><path d="M5 10v10h14V10" /></svg>
             </button>
-            <button class="ibtn" data-nav="editor" title="Editor">
+            <button class="ibtn" data-nav="editor" title="Explorer &amp; editor">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14" /></svg>
             </button>
             <button class="ibtn" data-side="search" title="Search in files (Ctrl Shift F)">
@@ -147,7 +147,10 @@
                   <button type="button" data-cat="All">All</button>
                 </div>
               </div>
-              <div class="ext__list" id="extList"></div>
+              <div class="ext__list">
+                <div id="pluginList"></div>
+                <div id="extList"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -273,6 +276,7 @@
       <div class="box mini subtle">
         <span id="line-count">—</span>
         <span id="char-count">—</span>
+        <span class="plugin-statuses" id="pluginStatus"></span>
         <button class="ibtn notifbtn" id="notifBtn" title="Notifications" aria-haspopup="true" aria-expanded="false">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15Z" /><path d="M10 20.5a2 2 0 0 0 4 0" /></svg>
           <span class="notifbtn__dot" id="notifDot" hidden></span>
@@ -322,6 +326,10 @@
           <div class="set-row">
             <div class="set-row__txt"><b>Editor theme</b><span>Install more from Extensions</span></div>
             <div class="set-row__ctl"><select class="pill" id="editorTheme"><option value="">MulTeam (follows app theme)</option></select></div>
+          </div>
+          <div class="set-row">
+            <div class="set-row__txt"><b>File icons</b><span>Icon themes from Extensions</span></div>
+            <div class="set-row__ctl"><select class="pill" id="iconTheme"><option value="">MulTeam (built-in)</option></select></div>
           </div>
           <div class="set-row">
             <div class="set-row__txt"><b>Accent</b><span>Used for actions and active states</span></div>
@@ -541,7 +549,8 @@
           <li><b>Ctrl+K</b> — jump to any project, open file, or app command.</li>
           <li><b>Ctrl+P</b> — open any file in the project by typing part of its name (type <b>&gt;</b> for commands).</li>
           <li><b>Ctrl+Shift+F</b> — search text across every file in the project; click a result to jump to it.</li>
-          <li><b>Ctrl+Shift+X</b> — Extensions: install color themes and snippets from Open VSX. Change theme with <b>View → Color Theme…</b>.</li>
+          <li><b>Ctrl+Shift+X</b> — Extensions: install color themes, file icon themes and snippets from Open VSX. Switch with <b>View → Color Theme…</b> / <b>File Icon Theme…</b>.</li>
+          <li><b>Plugins</b> — Extensions view → MulTeam plugins → <b>Create…</b> writes a working example (commands, a status item, completions). Edit its main.js and press Reload.</li>
           <li><b>Ctrl+Shift+G</b> — Source Control: stage, commit, pull and push. Click the branch name in the footer to switch or create branches.</li>
           <li><b>Ctrl+J</b> — show or hide the bottom panel. Click the ⊗ / ⚠ counts in the footer to jump to Problems.</li>
           <li><b>Ctrl+`</b> — open the terminal in the current project's folder. Use + for more, and pick PowerShell, Command Prompt or Git Bash.</li>

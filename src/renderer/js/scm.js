@@ -2,7 +2,7 @@
 // window.electronAPI.git (simple-git in the main process). All operations
 // run against the repository root that `status` reports, so a project that
 // is a subfolder of a bigger repo still stages the right paths.
-import { fileIconSvg, colorForExtension } from './icons.js';
+import { fileIcon } from './icons.js';
 
 const ICON = {
   stage: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
@@ -86,7 +86,7 @@ export function initScm({ getRoot, openFile, confirmDialog, promptDialog, toast,
       : `<button type="button" class="ibtn danger" data-act="discard" title="Discard changes">${ICON.discard}</button>
          <button type="button" class="ibtn" data-act="stage" title="Stage">${ICON.stage}</button>`;
     return `<div class="scm__file" data-path="${escapeHtml(f.path)}" data-group="${group}" title="${escapeHtml(f.path)} — ${LETTER_LABEL[f.letter] || f.letter}">
-      <span class="node-icon">${fileIconSvg(colorForExtension(name.split('.').pop()))}</span>
+      <span class="node-icon">${fileIcon(name)}</span>
       <span class="scm__name ${f.letter === 'D' ? 'is-deleted' : ''}">${escapeHtml(name)}</span>
       <span class="scm__dir">${escapeHtml(dir)}</span>
       <span class="scm__acts">

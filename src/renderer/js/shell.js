@@ -14,11 +14,12 @@ import { initMenubar } from './menubar.js';
 import { initScm } from './scm.js';
 import { initSidebarResize } from './sidebarResize.js';
 import { initExtensions } from './extensions.js';
+import { initPluginHost } from './pluginHost.js';
 import {
   fileIconSvg, folderIconSvg, chevronSvg, colorForExtension,
   saveIconSvg, trashIconSvg,
   duplicateIconSvg, renameIconSvg, copyIconSvg,
-  plusIconSvg, searchIconSvg, editIconSvg
+  plusIconSvg, searchIconSvg, editIconSvg, fileIcon, folderIcon
 } from './icons.js';
 
 applyStoredTheme();
@@ -358,7 +359,7 @@ function renderPanelProjects() {
 
     const icon = document.createElement('span');
     icon.className = 'node-icon';
-    icon.innerHTML = folderIconSvg(project && project.id === p.id);
+    icon.innerHTML = folderIcon(p.name, !!(project && project.id === p.id));
 
     const label = document.createElement('span');
     label.className = 'node-label';
@@ -648,7 +649,7 @@ async function loadFileTree(dirPath, container, { quiet = false } = {}) {
 
     const iconEl = document.createElement('span');
     iconEl.className = 'node-icon';
-    iconEl.innerHTML = node.type === 'directory' ? folderIconSvg(false) : fileIconSvg(colorForExtension(node.name.split('.').pop()));
+    iconEl.innerHTML = node.type === 'directory' ? folderIcon(node.name, false) : fileIcon(node.name);
 
     const labelEl = document.createElement('span');
     labelEl.className = 'node-label';
@@ -666,8 +667,15 @@ async function loadFileTree(dirPath, container, { quiet = false } = {}) {
 
 async function toggleDirectory(node, el, opts) {
   const existing = el.nextElementSibling;
-  if (existing && existing.dataset.parentPath === node.path) { existing.remove(); el.classList.remove('expanded'); return; }
+  const iconEl = el.querySelector('.node-icon');
+  if (existing && existing.dataset.parentPath === node.path) {
+    existing.remove();
+    el.classList.remove('expanded');
+    if (iconEl) iconEl.innerHTML = folderIcon(el.dataset.name, false);
+    return;
+  }
   el.classList.add('expanded');
+  if (iconEl) iconEl.innerHTML = folderIcon(el.dataset.name, true);
   const childContainer = document.createElement('div');
   childContainer.style.paddingLeft = '14px';
   childContainer.dataset.parentPath = node.path;
@@ -722,7 +730,11 @@ function collapseTree() {
   const host = currentFileTreeEl();
   if (!host) return;
   host.querySelectorAll('[data-parent-path]').forEach((c) => c.remove());
-  host.querySelectorAll('.file-tree-node.expanded').forEach((n) => n.classList.remove('expanded'));
+  host.querySelectorAll('.file-tree-node.expanded').forEach((n) => {
+    n.classList.remove('expanded');
+    const ic = n.querySelector('.node-icon');
+    if (ic) ic.innerHTML = folderIcon(n.dataset.name, false);
+  });
 }
 
 function sanitizeDocId(relativePath) {
@@ -758,7 +770,7 @@ function renderTabs() {
 
     const iconEl = document.createElement('span');
     iconEl.className = 'tab-icon';
-    iconEl.innerHTML = fileIconSvg(colorForExtension(name.split('.').pop()));
+    iconEl.innerHTML = fileIcon(name);
 
     const labelEl = document.createElement('span');
     labelEl.className = 'tab-label';
@@ -839,6 +851,8 @@ async function activateTabInner(filePath) {
 
   updateFileMeta();
 
+  pluginHost.emit('open', { path: filePath, language: activeWorkspace.languageId() });
+
   if (pendingReveal && samePath(pendingReveal.path, filePath)) {
     activeWorkspace.revealPosition(pendingReveal.line, pendingReveal.column, pendingReveal.length);
     pendingReveal = null;
@@ -855,7 +869,10 @@ async function activateTabInner(filePath) {
 
 function saveActiveFile(filePath) {
   if (!activeWorkspace || activeTabPath !== filePath) return;
-  window.electronAPI.writeFile(filePath, activeWorkspace.getValue()).then(() => scm.refreshSoon());
+  window.electronAPI.writeFile(filePath, activeWorkspace.getValue()).then(() => {
+    scm.refreshSoon();
+    pluginHost.emit('save', { path: filePath });
+  });
 }
 
 async function saveFileAs(filePath) {
@@ -1300,6 +1317,10 @@ function showSide(name) {
   if (name === 'ext') extensions.onShow();
   if (isSidebarCollapsed()) { setSidebarCollapsed(false); sidebarResize.remember(false); }
 }
+// The Editor (</>) icon doubles as "Explorer": it always brings the
+// project tree back, from Search / Source Control / Extensions.
+document.querySelector('.sidearray [data-nav="editor"]').addEventListener('click', () => showSide('explorer'));
+
 document.querySelectorAll('.sidearray [data-side]').forEach((b) => b.addEventListener('click', () => {
   if (currentSide === b.dataset.side) showSide('explorer');
   else {
@@ -1322,13 +1343,14 @@ function toggleTerminal() {
 /* ============================================================
    Command palette
    ============================================================ */
+let paletteCommands; // filled below; plugins add their commands to it
 const palette = initCommandPalette({
   getProjects: () => allProjects,
   getOpenFiles: () => (project ? openTabs.map((t) => ({ name: t.path.split(/[\\/]/).pop(), path: t.path })) : []),
   listProjectFiles: async () => (rootFolder ? { root: rootFolder, ...(await window.electronAPI.listFiles(rootFolder)) } : null),
   onOpenProject: (p) => openProjectView(p),
   onOpenFile: (path) => openFile(path),
-  commands: [
+  commands: paletteCommands = [
     { label: 'New project', action: () => openProjectModal('create', null) },
     { label: 'Toggle theme', action: () => applyTheme(getTheme() === 'dark' ? 'light' : 'dark') },
     { label: 'Open settings', action: () => openSettings() },
@@ -1337,6 +1359,8 @@ const palette = initCommandPalette({
     { label: 'Go to file', hint: 'Ctrl+P', action: () => setTimeout(() => openQuickOpen(), 0) },
     { label: 'Find in files', hint: 'Ctrl+Shift+F', action: () => openFindInFiles() },
     { label: 'Preferences: Color Theme', action: () => setTimeout(() => extensions.openThemePicker(), 0) },
+    { label: 'Preferences: File Icon Theme', action: () => setTimeout(() => extensions.openIconThemePicker(), 0) },
+    { label: 'Plugins: Reload all', action: () => pluginHost.reloadAll().then(() => toast('Plugins reloaded')) },
     { label: 'Extensions: Install themes & snippets', hint: 'Ctrl+Shift+X', action: () => showSide('ext') },
     { label: 'Refresh Explorer', action: () => refreshTree() },
     { label: 'Collapse folders in Explorer', action: () => collapseTree() },
@@ -1492,7 +1516,7 @@ initMenubar(document.getElementById('menubar'), [
     { label: 'Select All Occurrences', kbd: 'Ctrl+Shift+L', run: editorCmd('editor.action.selectHighlights'), enabled: hasEditor }
   ] },
   { label: 'View', items: [
-    { label: 'Command Palette', kbd: 'Ctrl+K', run: openPalette },
+    { label: 'Command Palette', kbd: 'Ctrl+Shift+P', run: openPalette },
     '-',
     { label: 'Dashboard', run: () => go('dashboard') },
     { label: 'Explorer', run: () => showSide('explorer') },
@@ -1512,6 +1536,7 @@ initMenubar(document.getElementById('menubar'), [
     { label: 'Reset Zoom', kbd: 'Ctrl+0', run: () => window.electronAPI.zoom('reset') },
     '-',
     { label: 'Color Theme…', run: () => extensions.openThemePicker() },
+    { label: 'File Icon Theme…', run: () => extensions.openIconThemePicker() },
     { label: 'Toggle Minimap', run: () => toggleMinimap() },
     { label: 'Toggle Theme', run: () => applyTheme(getTheme() === 'dark' ? 'light' : 'dark') }
   ] },
@@ -1540,31 +1565,87 @@ initMenubar(document.getElementById('menubar'), [
   ] }
 ]);
 
-const extensions = initExtensions({ toast, confirmDialog, pick: (opts) => { closeAllOverlays(); palette.pick(opts); } });
+const extensions = initExtensions({
+  toast,
+  confirmDialog,
+  pick: (opts) => { closeAllOverlays(); palette.pick(opts); },
+  // re-draw everything that shows file/folder icons
+  onIconThemeChange: () => {
+    document.querySelectorAll('#panel-project-list > .subitem.directory').forEach((row) => {
+      const p = allProjects.find((x) => x.name === row.querySelector('.node-label')?.textContent);
+      const ic = row.querySelector('.node-icon');
+      if (p && ic) ic.innerHTML = folderIcon(p.name, !!(project && project.id === p.id));
+    });
+    refreshTree();
+    renderTabs();
+    scm.refresh();
+  }
+});
+
+// What plugins may touch (each call is permission-checked in pluginHost.js).
+const pluginHost = initPluginHost({
+  toast,
+  confirmDialog,
+  promptDialog,
+  commands: paletteCommands,
+  app: {
+    editorText: () => (activeWorkspace ? activeWorkspace.getValue() : null),
+    selectedText: () => (activeWorkspace ? activeWorkspace.selectionText() : ''),
+    replaceSelection: (text) => { if (!activeWorkspace) throw new Error('No file is open.'); activeWorkspace.replaceSelection(text); return null; },
+    insertText: (text) => { if (!activeWorkspace) throw new Error('No file is open.'); activeWorkspace.insertText(text); return null; },
+    currentFile: () => (activeWorkspace && activeTabPath ? { path: activeTabPath, language: activeWorkspace.languageId() } : null),
+    root: () => rootFolder,
+    join: (root, rel) => joinPath(root, rel)
+  }
+});
 
 function openQuickOpen() {
   closeAllOverlays();
   palette.open('files');
 }
 
+function togglePalette() {
+  const open = palette.isOpen() && palette.mode() === 'all';
+  closeAllOverlays();
+  if (!open) { palette.open('all'); scrim.classList.add('is-open'); }
+}
+
+// App-wide shortcuts. Registered in the CAPTURE phase so they win over the
+// focused editor/terminal — Monaco otherwise swallows e.g. Ctrl+K (its chord
+// prefix) and the palette would never open while typing. A matched shortcut
+// is stopped so Monaco/xterm don't also act on it.
+function appShortcut(e) {
+  const mod = e.ctrlKey || e.metaKey;
+  if (!mod || e.altKey) return null;
+  const k = e.key.toLowerCase();
+  if (!e.shiftKey && k === 'k') return togglePalette;
+  if (e.shiftKey && k === 'p') return togglePalette;                       // VS Code habit
+  if (!e.shiftKey && k === 'p') return () => (palette.isOpen() && palette.mode() === 'files' ? closeAllOverlays() : openQuickOpen());
+  if (e.shiftKey && k === 'f') return openFindInFiles;
+  if (e.shiftKey && k === 'g') return openSourceControl;
+  if (e.shiftKey && k === 'x') return () => showSide('ext');
+  if (e.shiftKey && (e.key === '`' || e.key === '~')) return openTerminalNew;
+  if (!e.shiftKey && e.key === '`') return toggleTerminal;
+  if (!e.shiftKey && k === 'b') return toggleSidebar;
+  if (!e.shiftKey && k === 'j') return () => (bottomPanel.isOpen() ? bottomPanel.close() : (go('editor'), bottomPanel.open()));
+  if (!e.shiftKey && k === 'w' && activeTabPath) return () => closeTab(activeTabPath);
+  if (!e.shiftKey && k === 's') return () => { if (activeTabPath) saveActiveFile(activeTabPath); };
+  if (e.key === ',') return openSettings;
+  return null;
+}
+
 document.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'p') {
-    e.preventDefault();
-    if (palette.isOpen() && palette.mode() === 'files') closeAllOverlays();
-    else openQuickOpen();
-  }
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'f') { e.preventDefault(); openFindInFiles(); }
-  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'b') { e.preventDefault(); toggleSidebar(); }
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'g') { e.preventDefault(); openSourceControl(); }
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'x') { e.preventDefault(); showSide('ext'); }
-  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'w' && activeTabPath) { e.preventDefault(); closeTab(activeTabPath); }
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === '`' || e.key === '~')) { e.preventDefault(); openTerminalNew(); return; }
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); const open = palette.isOpen(); closeAllOverlays(); if (!open) { palette.open(); scrim.classList.add('is-open'); } }
+  const run = appShortcut(e);
+  if (!run) return;
+  e.preventDefault();
+  e.stopPropagation();
+  run();
+}, true);
+
+// Escape stays in the normal (bubble) phase so the editor can close its own
+// find widget / suggestions first.
+document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { closeAllOverlays(); hideContextMenu(); settleConfirm(false); settlePrompt(null); }
-  if (e.key === ',' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); openSettings(); }
-  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'j') { e.preventDefault(); bottomPanel.isOpen() ? bottomPanel.close() : (go('editor'), bottomPanel.open()); }
-  if ((e.ctrlKey || e.metaKey) && e.key === '`') { e.preventDefault(); toggleTerminal(); }
-  if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); if (activeTabPath) saveActiveFile(activeTabPath); }
 });
 
 /* ============================================================

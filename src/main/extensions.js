@@ -1,7 +1,7 @@
 // Extensions from Open VSX (open-vsx.org — the open marketplace VS Code
 // forks use; Microsoft's marketplace terms don't allow other editors).
-// For now only declarative contributions are used: color themes and
-// snippets. Installs live in <userData>/extensions/<publisher.name>/ with
+// For now only declarative contributions are used: color themes, file
+// icon themes and snippets. Installs live in <userData>/extensions/<publisher.name>/ with
 // the original package.json, so richer contribution types can be enabled
 // later without reinstalling.
 const { app, net } = require('electron');
@@ -82,8 +82,9 @@ async function install({ namespace, name }) {
   const contributes = pkg.contributes || {};
   const themes = (contributes.themes || []).filter((t) => t.path);
   const snippets = (contributes.snippets || []).filter((s) => s.path && s.language);
-  if (!themes.length && !snippets.length) {
-    throw new Error("This extension doesn't contribute color themes or snippets, which is all MulTeam supports for now.");
+  const iconThemes = (contributes.iconThemes || []).filter((t) => t.path);
+  if (!themes.length && !snippets.length && !iconThemes.length) {
+    throw new Error("This extension doesn't contribute color themes, file icon themes or snippets, which is all MulTeam supports for now.");
   }
 
   const id = `${namespace}.${name}`;
@@ -94,7 +95,19 @@ async function install({ namespace, name }) {
   // copy only what we use: manifest, the declared theme/snippet files (and
   // any files a theme `include`s, which sit next to it), plus the icon
   const wanted = new Set(['package.json']);
-  for (const c of [...themes, ...snippets]) wanted.add(path.posix.normalize(c.path.replace(/^\.\//, '')));
+  for (const c of [...themes, ...snippets, ...iconThemes]) wanted.add(path.posix.normalize(c.path.replace(/^\.\//, '')));
+  // icon themes reference their SVG/PNG files by relative path — read each
+  // icon theme definition and keep exactly the files it points at
+  for (const t of iconThemes) {
+    const rel = path.posix.normalize(t.path.replace(/^\.\//, ''));
+    const entry = zip.getEntry(`extension/${rel}`);
+    if (!entry) continue;
+    let def;
+    try { def = parseJsonc(entry.getData().toString('utf8')); } catch { continue; }
+    for (const d of Object.values(def.iconDefinitions || {})) {
+      if (d && typeof d.iconPath === 'string') wanted.add(path.posix.normalize(path.posix.join(path.posix.dirname(rel), d.iconPath)));
+    }
+  }
   if (pkg.icon) wanted.add(path.posix.normalize(pkg.icon.replace(/^\.\//, '')));
   const themeDirs = themes.map((t) => path.posix.dirname(path.posix.normalize(t.path.replace(/^\.\//, ''))));
 
@@ -119,6 +132,7 @@ async function install({ namespace, name }) {
     icon: pkg.icon && fsSync.existsSync(path.join(dir, pkg.icon)) ? pkg.icon : null,
     themes: themes.map((t) => ({ label: t.label || t.id || path.basename(t.path, '.json'), uiTheme: t.uiTheme || 'vs-dark', path: t.path })),
     snippets: snippets.map((s) => ({ language: s.language, path: s.path })),
+    iconThemes: iconThemes.map((t) => ({ id: t.id || t.label, label: t.label || t.id || path.basename(t.path, '.json'), path: t.path })),
     installedAt: Date.now()
   };
   const list = (await readRegistry()).filter((e) => e.id !== id);

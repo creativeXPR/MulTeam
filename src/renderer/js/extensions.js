@@ -6,6 +6,18 @@ import * as monaco from 'monaco-editor';
 import { setCustomEditorTheme, setMonacoTheme } from './editor.js';
 import { getTheme } from './theme.js';
 import { getSettings, updateSettings } from './settings.js';
+import { setIconTheme } from './icons.js';
+
+// tiny posix path helpers (icon paths inside an extension are relative)
+function posixNormalize(p) {
+  const out = [];
+  for (const seg of p.replace(/\\/g, '/').split('/')) {
+    if (!seg || seg === '.') continue;
+    if (seg === '..') out.pop(); else out.push(seg);
+  }
+  return out.join('/');
+}
+const posixDir = (p) => posixNormalize(p).split('/').slice(0, -1).join('/');
 
 const ICON_FALLBACK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><path d="M17 13.5v7M13.5 17h7"/></svg>';
 
@@ -85,12 +97,14 @@ function compact(n) {
   return n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : String(n);
 }
 
-export function initExtensions({ toast, confirmDialog, pick }) {
+export function initExtensions({ toast, confirmDialog, pick, onIconThemeChange = () => {} }) {
   const api = window.electronAPI?.extensions;
   const input = document.getElementById('extSearch');
   const listEl = document.getElementById('extList');
   const filterEl = document.getElementById('extFilter');
   const themeSelect = document.getElementById('editorTheme');
+  const iconThemeSelect = document.getElementById('iconTheme');
+  let activeIcon = null; // { t, def } of the applied icon theme
 
   let installed = [];
   let category = 'Themes';
@@ -164,6 +178,104 @@ export function initExtensions({ toast, confirmDialog, pick }) {
     });
   }
 
+  // ---------- file icon themes ----------
+  function allIconThemes() {
+    return installed.flatMap((e) => (e.iconThemes || []).map((t) => ({ ...t, extId: e.id, extName: e.displayName, key: `${e.id}::${t.id}` })));
+  }
+
+  // Turns a VS Code icon theme definition into lookup tables for icons.js.
+  // The theme's `light` section overrides entries while the app is light.
+  function resolveIconTheme(t, def) {
+    const dir = posixDir(t.path.replace(/^\.\//, ''));
+    const light = getTheme() === 'light' && def.light ? def.light : null;
+    const merged = (k) => ({ ...(def[k] || {}), ...((light && light[k]) || {}) });
+    const lower = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k.toLowerCase(), v]));
+    const extToLang = {};
+    for (const lang of monaco.languages.getLanguages()) {
+      for (const e of lang.extensions || []) {
+        const key = e.replace(/^\./, '').toLowerCase();
+        if (!(key in extToLang)) extToLang[key] = lang.id;
+      }
+    }
+    return {
+      url(id) {
+        const d = def.iconDefinitions?.[id];
+        if (!d || typeof d.iconPath !== 'string') return null; // font-based icons aren't supported
+        const rel = posixNormalize(`${dir}/${d.iconPath}`);
+        return `/ext-assets/${encodeURIComponent(t.extId)}/${rel.split('/').map(encodeURIComponent).join('/')}`;
+      },
+      file: (light && light.file) || def.file,
+      folder: (light && light.folder) || def.folder,
+      folderExpanded: (light && light.folderExpanded) || def.folderExpanded,
+      fileNames: lower(merged('fileNames')),
+      fileExtensions: lower(merged('fileExtensions')),
+      folderNames: lower(merged('folderNames')),
+      folderNamesExpanded: lower(merged('folderNamesExpanded')),
+      languageIds: merged('languageIds'),
+      extToLang
+    };
+  }
+
+  // key '' = MulTeam's built-in icons
+  async function applyIconTheme(key, { persist = true } = {}) {
+    const t = key && allIconThemes().find((x) => x.key === key);
+    if (!t) {
+      activeIcon = null;
+      setIconTheme(null);
+      key = '';
+    } else {
+      try {
+        const def = activeIcon?.t.key === t.key ? activeIcon.def : await api.readJson(t.extId, t.path);
+        const usable = Object.values(def.iconDefinitions || {}).some((d) => d && typeof d.iconPath === 'string');
+        if (!usable) throw new Error('this icon theme uses an icon font, which MulTeam doesn\u2019t support yet');
+        activeIcon = { t, def };
+        setIconTheme(resolveIconTheme(t, def));
+      } catch (err) {
+        toast(`Couldn't load that icon theme: ${String(err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')}`, 'error');
+        activeIcon = null;
+        setIconTheme(null);
+        key = '';
+      }
+    }
+    if (persist) {
+      updateSettings({ iconTheme: key });
+      if (iconThemeSelect) iconThemeSelect.value = key;
+    }
+    onIconThemeChange();
+  }
+
+  function paintIconThemeOptions() {
+    if (!iconThemeSelect) return;
+    const current = getSettings().iconTheme || '';
+    iconThemeSelect.innerHTML = '<option value="">MulTeam (built-in)</option>' +
+      allIconThemes().map((t) => `<option value="${escapeHtml(t.key)}">${escapeHtml(t.label)}</option>`).join('');
+    iconThemeSelect.value = allIconThemes().some((t) => t.key === current) ? current : '';
+  }
+  iconThemeSelect?.addEventListener('change', () => applyIconTheme(iconThemeSelect.value));
+
+  function openIconThemePicker(onlyExtId) {
+    const themes = allIconThemes().filter((t) => !onlyExtId || t.extId === onlyExtId);
+    const before = getSettings().iconTheme || '';
+    const items = [
+      ...(onlyExtId ? [] : [{ label: 'MulTeam (built-in)', detail: 'built-in', value: '' }]),
+      ...themes.map((t) => ({ label: t.label, detail: t.extName, value: t.key }))
+    ];
+    if (items.length <= (onlyExtId ? 0 : 1)) { toast('Install a file icon theme from the Extensions view first (e.g. Material Icon Theme)', 'error'); return; }
+    pick({
+      title: 'Select File Icon Theme (↑↓ to preview)',
+      items,
+      current: before,
+      onPreview: (it) => applyIconTheme(it.value, { persist: false }),
+      onPick: (it) => applyIconTheme(it.value),
+      onCancel: () => applyIconTheme(before, { persist: false })
+    });
+  }
+
+  // light/dark switch: icon themes may ship light variants
+  document.addEventListener('multeam:themechange', () => {
+    if (activeIcon) { setIconTheme(resolveIconTheme(activeIcon.t, activeIcon.def)); onIconThemeChange(); }
+  });
+
   // ---------- snippets ----------
   function ensureProvider(lang) {
     if (providers.has(lang)) return;
@@ -211,6 +323,7 @@ export function initExtensions({ toast, confirmDialog, pick }) {
   async function reloadInstalled() {
     installed = api ? await api.list() : [];
     paintThemeOptions();
+    paintIconThemeOptions();
     await loadSnippets();
     render();
   }
@@ -239,12 +352,14 @@ export function initExtensions({ toast, confirmDialog, pick }) {
   function card(e, isInstalled) {
     const rec = installed.find((x) => x.id === e.id);
     const state = busy.has(e.id) ? 'busy' : rec ? 'installed' : 'available';
-    const kinds = rec ? [rec.themes.length ? `${rec.themes.length} theme${rec.themes.length === 1 ? '' : 's'}` : '', rec.snippets.length ? `snippets: ${[...new Set(rec.snippets.map((s) => s.language))].join(', ')}` : ''].filter(Boolean).join(' · ') : '';
+    const iconCount = rec?.iconThemes?.length || 0;
+    const kinds = rec ? [rec.themes.length ? `${rec.themes.length} color theme${rec.themes.length === 1 ? '' : 's'}` : '', iconCount ? `${iconCount} icon theme${iconCount === 1 ? '' : 's'}` : '', rec.snippets.length ? `snippets: ${[...new Set(rec.snippets.map((s) => s.language))].join(', ')}` : ''].filter(Boolean).join(' · ') : '';
     const icon = e.icon && !isInstalled ? `<img src="${escapeHtml(e.icon)}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : `<span class="ext__ic" data-icon-for="${escapeHtml(e.id)}">${ICON_FALLBACK}</span>`;
     let actions = '';
     if (state === 'busy') actions = '<span class="ext__busy">Working…</span>';
     else if (state === 'installed') {
-      actions = `${rec.themes.length ? `<button type="button" class="chipbtn" data-ext-theme="${escapeHtml(e.id)}">Set theme</button>` : ''}
+      actions = `${rec.themes.length ? `<button type="button" class="chipbtn" data-ext-theme="${escapeHtml(e.id)}">Set color theme</button>` : ''}
+        ${iconCount ? `<button type="button" class="chipbtn" data-ext-icons="${escapeHtml(e.id)}">Set icon theme</button>` : ''}
         <button type="button" class="chipbtn danger" data-ext-uninstall="${escapeHtml(e.id)}">Uninstall</button>`;
     } else actions = `<button type="button" class="chipbtn is-primary" data-ext-install="${escapeHtml(e.id)}">Install</button>`;
     return `<div class="ext" title="${escapeHtml(e.description)}">
@@ -285,6 +400,8 @@ export function initExtensions({ toast, confirmDialog, pick }) {
     const ins = e.target.closest('[data-ext-install]');
     const un = e.target.closest('[data-ext-uninstall]');
     const th = e.target.closest('[data-ext-theme]');
+    const ic = e.target.closest('[data-ext-icons]');
+    if (ic) openIconThemePicker(ic.dataset.extIcons);
     if (ins) {
       const id = ins.dataset.extInstall;
       const item = results.find((r) => r.id === id);
@@ -295,6 +412,7 @@ export function initExtensions({ toast, confirmDialog, pick }) {
         await reloadInstalled();
         toast(`Installed ${rec.displayName}`);
         if (rec.themes.length) openThemePicker(rec.id);
+        else if (rec.iconThemes?.length) openIconThemePicker(rec.id);
       } catch (err) {
         toast(String(err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), 'error');
       } finally { busy.delete(id); render(); }
@@ -304,7 +422,7 @@ export function initExtensions({ toast, confirmDialog, pick }) {
       const rec = installed.find((r) => r.id === id);
       const ok = await confirmDialog({
         title: `Uninstall ${rec?.displayName || id}?`,
-        message: rec?.themes.length ? 'Its themes and snippets will be removed. If one of its themes is in use, the editor goes back to the MulTeam theme.' : 'Its snippets will be removed.',
+        message: 'Its themes, icons and snippets will be removed. Anything of it in use goes back to MulTeam\u2019s built-in look.',
         confirmLabel: 'Uninstall',
         danger: true
       });
@@ -312,6 +430,8 @@ export function initExtensions({ toast, confirmDialog, pick }) {
       busy.add(id); render();
       try {
         const usingIt = (getSettings().editorTheme || '').startsWith(`${id}::`);
+        const usingIcons = (getSettings().iconTheme || '').startsWith(`${id}::`);
+        if (usingIcons) await applyIconTheme(''); // before the files disappear
         await api.uninstall(id);
         await reloadInstalled();
         if (usingIt) await applyEditorTheme('');
@@ -337,11 +457,14 @@ export function initExtensions({ toast, confirmDialog, pick }) {
   reloadInstalled().then(() => {
     const key = getSettings().editorTheme;
     if (key) applyEditorTheme(key, { persist: false });
+    const iconKey = getSettings().iconTheme;
+    if (iconKey) applyIconTheme(iconKey, { persist: false });
   });
 
   return {
     onShow() { if (!searchedOnce) { searchedOnce = true; runSearch(); } setTimeout(() => input?.focus(), 120); },
     openThemePicker: () => openThemePicker(),
+    openIconThemePicker: () => openIconThemePicker(),
     reload: reloadInstalled
   };
 }

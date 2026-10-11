@@ -6,6 +6,7 @@ const { setupTerminalHandlers } = require('./terminal');
 const { setupSearchHandlers } = require('./search');
 const { setupGitHandlers } = require('./git');
 const { setupExtensionHandlers } = require('./extensions');
+const { setupPluginHandlers } = require('./plugins');
 const { titleBarOverlayFor, zoom } = require('./window');
 
 function registerIpcHandlers(ipcMain) {
@@ -30,6 +31,7 @@ function registerIpcHandlers(ipcMain) {
   setupSearchHandlers(ipcMain, IPC);
   setupGitHandlers(ipcMain, IPC);
   setupExtensionHandlers(ipcMain, IPC);
+  setupPluginHandlers(ipcMain, IPC);
 }
 
 module.exports = { registerIpcHandlers };

@@ -2,7 +2,7 @@
 // editor.js#watchMarkers). Only files open in the editor are checked —
 // there's no project-wide language service yet.
 import { watchMarkers, MarkerSeverity } from './editor.js';
-import { fileIconSvg, colorForExtension } from './icons.js';
+import { fileIcon } from './icons.js';
 
 const ICONS = {
   error: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/></svg>',
@@ -59,7 +59,7 @@ export function initProblems({ onReveal }) {
       const fsPath = items[0].resource.fsPath;
       const name = fsPath.split(/[\\/]/).pop();
       html += `<div class="problems__file">
-        <span class="node-icon">${fileIconSvg(colorForExtension(name.split('.').pop()))}</span>
+        <span class="node-icon">${fileIcon(name)}</span>
         <b>${escapeHtml(name)}</b><span class="problems__path">${escapeHtml(fsPath)}</span>
         <span class="problems__badge">${items.length}</span>
       </div>`;
