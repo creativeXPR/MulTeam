@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   renameEntry: (oldPath, newPath) => ipcRenderer.invoke(IPC.RENAME_ENTRY, oldPath, newPath),
   duplicateEntry: (entryPath) => ipcRenderer.invoke(IPC.DUPLICATE_ENTRY, entryPath),
   watchPath: (watchPath) => ipcRenderer.invoke(IPC.WATCH_PATH, watchPath),
+  revealPath: (target) => ipcRenderer.invoke(IPC.REVEAL_PATH, target),
   unwatchPath: (watchPath) => ipcRenderer.invoke(IPC.UNWATCH_PATH, watchPath),
 
   onFileExternalChange: (callback) => {

@@ -11,6 +11,7 @@ const IPC = Object.freeze({
   READ_FILE: 'fs:readFile',
   WRITE_FILE: 'fs:writeFile',
   WATCH_PATH: 'fs:watchPath',
+  REVEAL_PATH: 'fs:reveal',
   UNWATCH_PATH: 'fs:unwatchPath',
   FILE_CHANGED: 'fs:changed',
   CREATE_FILE: 'fs:createFile',

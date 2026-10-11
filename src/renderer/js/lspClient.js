@@ -108,6 +108,7 @@ export class LspClient {
           signatureHelp: { signatureInformation: { documentationFormat: ['markdown', 'plaintext'], parameterInformation: { labelOffsetSupport: true } } },
           definition: { linkSupport: false },
           formatting: { dynamicRegistration: false },
+          documentSymbol: { hierarchicalDocumentSymbolSupport: true },
           publishDiagnostics: { relatedInformation: false }
         }
       }
@@ -335,6 +336,27 @@ export class LspClient {
       }, 15000);
       return (edits || []).map((e) => ({ range: toRange(e.range), text: e.newText }));
     } catch { return []; }
+  }
+
+  // Normalized symbol tree for breadcrumbs: [{ name, start, end, children }]
+  async documentSymbols(model) {
+    if (!this.capabilities.documentSymbolProvider || !this.handles(model)) return null;
+    this.sync(model);
+    try {
+      const res = await this.request('textDocument/documentSymbol', { textDocument: { uri: model.uri.toString() } }, 8000);
+      if (!Array.isArray(res)) return null;
+      const norm = (d) => {
+        const r = d.range || d.location?.range;
+        return r && {
+          name: d.name,
+          start: { line: r.start.line + 1, col: r.start.character + 1 },
+          end: { line: r.end.line + 1, col: r.end.character + 1 },
+          children: (d.children || []).map(norm).filter(Boolean)
+        };
+      };
+      // flat SymbolInformation[] has no hierarchy; containment still works
+      return res.map(norm).filter(Boolean);
+    } catch { return null; }
   }
 
   async definition(model, position) {

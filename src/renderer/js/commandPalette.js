@@ -69,7 +69,7 @@ export function initCommandPalette({ getProjects, getOpenFiles, listProjectFiles
     groups = groups.filter((g) => g.items.length);
     flat = [];
     if (!groups.length) {
-      resultsEl.innerHTML = `<div class="empty" style="padding:34px 10px"><b>No matches</b>${emptyText}</div>`;
+      resultsEl.innerHTML = `<div class="empty-state" style="padding:34px 10px"><b>No matches</b>${emptyText}</div>`;
       return;
     }
     resultsEl.innerHTML = groups.map((g) =>
@@ -106,7 +106,7 @@ export function initCommandPalette({ getProjects, getOpenFiles, listProjectFiles
     if (!fileIndex) {
       resultsEl.innerHTML = indexLoading
         ? '<div class="results__title">Indexing files…</div>'
-        : '<div class="empty" style="padding:34px 10px"><b>No project open</b>Open a project to search its files, or type &gt; for commands.</div>';
+        : '<div class="empty-state" style="padding:34px 10px"><b>No project open</b>Open a project to search its files, or type &gt; for commands.</div>';
       return;
     }
 

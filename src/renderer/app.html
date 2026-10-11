@@ -44,7 +44,7 @@
     </nav>
 
     <!-- ============ MAIN ============ -->
-    <div class="main">
+    <div class="app-main">
       <aside class="sidebar" id="sidebar">
         <div class="box">
           <!-- sidearray: icon strip -->
@@ -183,7 +183,7 @@
       </aside>
       <div class="sash" id="sidebarSash" title="Drag to resize · double-click to reset" role="separator" aria-orientation="vertical"></div>
 
-      <section class="body">
+      <section class="app-body">
         <div class="box">
           <!-- ===== DASHBOARD VIEW ===== -->
           <section class="view scroll" id="view-dashboard">
@@ -363,6 +363,7 @@ multeam.on('save', ({ path }) =&gt; {});</code></pre>
           <!-- ===== EDITOR VIEW ===== -->
           <section class="view editor-view" id="view-editor" hidden>
             <div id="tab-bar" class="tab-bar"></div>
+            <nav id="breadcrumbs" class="crumbs" aria-label="Breadcrumbs"></nav>
             <div id="monaco-container" data-empty="Open a project from the sidebar"></div>
 
             <!-- bottom panel (Ctrl+J) -->
@@ -406,7 +407,7 @@ multeam.on('save', ({ path }) =&gt; {});</code></pre>
           <svg class="footbtn__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2.2" /><circle cx="6" cy="19" r="2.2" /><circle cx="18" cy="8" r="2.2" /><path d="M6 7.2v9.6M18 10.2c0 4-6 3-11 6.6" /></svg>
           <span id="branchName"></span><span id="branchSync" class="branch-sync"></span>
         </button>
-        <span class="status-bar">
+        <span class="conn-status">
           <span id="status-dot" class="status-dot"></span>
           <span id="status-text">Local sync</span>
         </span>
@@ -515,13 +516,13 @@ multeam.on('save', ({ path }) =&gt; {});</code></pre>
           </div>
           <div class="set-row">
             <div class="set-row__txt"><b>Ligatures</b><span>Combine -&gt; and != into one glyph</span></div>
-            <div class="set-row__ctl"><button class="toggle is-on" id="toggleLigatures"></button></div>
+            <div class="set-row__ctl"><button class="switch is-on" id="toggleLigatures"></button></div>
           </div>
           <div class="set-row">
             <div class="set-row__txt"><b>Minimap</b><span>Overview strip on the right edge</span></div>
-            <div class="set-row__ctl"><button class="toggle is-on" id="toggleMinimap"></button></div>
+            <div class="set-row__ctl"><button class="switch is-on" id="toggleMinimap"></button></div>
           </div>
-          <div class="preview" id="preview"><span class="c3">// preview</span>
+          <div class="set-preview" id="preview"><span class="c3">// preview</span>
 <span class="c1">export function</span> <span class="c4">mergeChanges</span>(name) {
 <span id="ind">  </span><span class="c1">return</span> queue.<span class="c4">push</span>(<span class="c2">`sync:${name}`</span>);
 }</div>
@@ -550,11 +551,11 @@ multeam.on('save', ({ path }) =&gt; {});</code></pre>
           <h4>Workflow</h4>
           <div class="set-row">
             <div class="set-row__txt"><b>Autosave</b><span>Save 800 ms after you stop typing</span></div>
-            <div class="set-row__ctl"><button class="toggle is-on" id="toggleAutosave"></button></div>
+            <div class="set-row__ctl"><button class="switch is-on" id="toggleAutosave"></button></div>
           </div>
           <div class="set-row">
             <div class="set-row__txt"><b>Format on save</b><span>When you press Ctrl+S (not on autosave)</span></div>
-            <div class="set-row__ctl"><button class="toggle" id="toggleFormatOnSave"></button></div>
+            <div class="set-row__ctl"><button class="switch" id="toggleFormatOnSave"></button></div>
           </div>
         </div>
       </div>

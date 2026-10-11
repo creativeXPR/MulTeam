@@ -538,8 +538,24 @@ export function initExtensions({ toast, confirmDialog, pick, onIconThemeChange =
     onShow() { if (!searchedOnce) { searchedOnce = true; setTab(tab); } setTimeout(() => input?.focus(), 120); },
     showTab: (name) => setTab(name),
     openThemePicker: () => openThemePicker(),
-    // the light/dark switch means "MulTeam's own look": drop any color theme
     async resetColorTheme() { if (hasAppPalette() || getSettings().editorTheme) { await applyEditorTheme(''); return true; } return false; },
+    // Light/dark switch while a color theme is active: move to the same
+    // extension's light or dark variant. Returns { switched } | { missing } | { same } | null (no theme).
+    async switchColorThemeMode(mode) {
+      const cur = allThemes().find((t) => t.key === getSettings().editorTheme);
+      if (!cur) return null;
+      const isLight = (t) => t.uiTheme === 'vs' || t.uiTheme === 'hc-light';
+      if (isLight(cur) === (mode === 'light')) return { same: cur.label };
+      const siblings = allThemes().filter((t) => t.extId === cur.extId && isLight(t) === (mode === 'light'));
+      if (!siblings.length) return { missing: cur.label };
+      // "GitHub Light Default" ↔ "GitHub Dark Default"; else the longest shared name prefix
+      const swapped = cur.label.replace(/\b(dark|light)\b/i, (w) => (w.toLowerCase() === 'dark' ? 'Light' : 'Dark')).toLowerCase();
+      const common = (a, b) => { let i = 0; while (i < a.length && a[i] === b[i]) i++; return i; };
+      const best = siblings.find((t) => t.label.toLowerCase() === swapped)
+        || [...siblings].sort((a, b) => common(b.label.toLowerCase(), cur.label.toLowerCase()) - common(a.label.toLowerCase(), cur.label.toLowerCase()))[0];
+      await applyEditorTheme(best.key);
+      return { switched: best.label };
+    },
     openIconThemePicker: () => openIconThemePicker(),
     reload: reloadInstalled
   };

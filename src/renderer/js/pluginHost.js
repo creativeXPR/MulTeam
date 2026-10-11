@@ -319,7 +319,7 @@ export function initPluginHost({ app, toast, confirmDialog, promptDialog, comman
         <div class="ext__media"><span class="ext__ic plugin__ic">${escapeHtml((p.name[0] || '?').toUpperCase())}</span></div>
         <div class="ext__info">
           <div class="ext__top"><b>${escapeHtml(p.name)}</b><span class="ext__dl">${escapeHtml(p.version)}</span>
-            <button type="button" class="toggle sm ${p.enabled ? 'is-on' : ''}" data-plugin-toggle="${escapeHtml(p.id)}" title="${p.enabled ? 'Disable' : 'Enable'}" aria-label="${p.enabled ? 'Disable' : 'Enable'} ${escapeHtml(p.name)}"></button>
+            <button type="button" class="switch sm ${p.enabled ? 'is-on' : ''}" data-plugin-toggle="${escapeHtml(p.id)}" title="${p.enabled ? 'Disable' : 'Enable'}" aria-label="${p.enabled ? 'Disable' : 'Enable'} ${escapeHtml(p.name)}"></button>
           </div>
           ${p.description ? `<div class="ext__desc">${escapeHtml(p.description)}</div>` : ''}
           <div class="ext__meta">${p.permissions.length ? p.permissions.map((x) => `<span class="perm">${escapeHtml(x)}</span>`).join('') : '<span>no permissions</span>'}${live ? '<span class="plugin__live">● running</span>' : ''}</div>

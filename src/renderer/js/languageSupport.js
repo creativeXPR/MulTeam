@@ -296,6 +296,12 @@ export function initLanguageSupport({ toast, confirmDialog, getRoot, getActiveMo
     onFileSaved(model) { for (const c of clients.values()) c.didSave(model); },
     onProjectClosed() { clientRoot = null; queue = queue.then(() => stopAll()).catch(() => {}); },
     refreshStatus: paintStatus,
+    // symbols for breadcrumbs from the running server for this file, if any
+    async symbolsFor(model) {
+      const entry = model && entryForLang(model.getLanguageId());
+      const client = entry && clients.get(entry.id);
+      return client && client.state === 'running' ? client.documentSymbols(model) : null;
+    },
     setView(tabName, query = '') {
       view = { mode: { Languages: 'servers', Formatters: 'tools', Installed: 'installed' }[tabName] || 'hidden', query };
       render();

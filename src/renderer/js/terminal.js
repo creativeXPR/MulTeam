@@ -64,7 +64,7 @@ export function initTerminal({ panel, getCwd, confirmDialog }) {
   }
   new ResizeObserver(() => fitActive()).observe(host);
 
-  async function create() {
+  async function create({ cwd } = {}) {
     const settings = getSettings();
     const term = new Terminal({
       fontFamily: settings.fontFamily,
@@ -85,7 +85,7 @@ export function initTerminal({ panel, getCwd, confirmDialog }) {
 
     let info;
     try {
-      info = await api.create({ shellId: shellSelect.value, cwd: getCwd(), cols: term.cols, rows: term.rows });
+      info = await api.create({ shellId: shellSelect.value, cwd: cwd || getCwd(), cols: term.cols, rows: term.rows });
     } catch (err) {
       term.write(`\x1b[31mCouldn't start the shell: ${String(err.message || err)}\x1b[0m\r\n`);
       return;

@@ -1,4 +1,4 @@
-const { dialog, BrowserWindow } = require('electron');
+const { dialog, BrowserWindow, shell } = require('electron');
 const fs = require('node:fs/promises');
 const fsSync = require('node:fs');
 const path = require('node:path');
@@ -126,6 +126,12 @@ function setupFileSystemHandlers(ipcMain) {
     } catch (err) {
       throw new Error(`Failed to duplicate: ${err.message}`);
     }
+  });
+
+  // "Reveal in File Explorer": opens the OS file manager with the item selected
+  ipcMain.handle(IPC.REVEAL_PATH, (_event, target) => {
+    if (typeof target !== 'string' || !fsSync.existsSync(target)) throw new Error('That item no longer exists.');
+    shell.showItemInFolder(path.resolve(target));
   });
 
   ipcMain.handle(IPC.WATCH_PATH, (event, watchPath) => {

@@ -18,6 +18,7 @@ import { initPluginHost } from './pluginHost.js';
 import { initPluginSpace } from './pluginSpace.js';
 import { initLanguageSupport } from './languageSupport.js';
 import { initFormatting } from './formatting.js';
+import { initBreadcrumbs } from './breadcrumbs.js';
 import {
   fileIconSvg, folderIconSvg, chevronSvg, colorForExtension,
   saveIconSvg, trashIconSvg,
@@ -263,7 +264,7 @@ function renderProjectsGrid() {
   document.getElementById('projCount').textContent = `${allProjects.length} project${allProjects.length === 1 ? '' : 's'}`;
 
   if (!list.length) {
-    gridEl.innerHTML = `<div class="empty"><b>No projects${wsFilter !== 'all' ? ` (${wsFilter})` : ''}</b>Create one to start writing code — no account needed.</div>`;
+    gridEl.innerHTML = `<div class="empty-state"><b>No projects${wsFilter !== 'all' ? ` (${wsFilter})` : ''}</b>Create one to start writing code — no account needed.</div>`;
     return;
   }
 
@@ -278,7 +279,7 @@ function renderProjectsGrid() {
           <div class="project__path">${escapeHtml(p.folderPath)}</div>
         </div>
       </div>
-      <span class="status ${p.cloudEnabled ? 'cloud' : 'local'}"><i></i>${p.cloudEnabled ? 'Cloud' : 'Local'}</span>
+      <span class="pstatus ${p.cloudEnabled ? 'cloud' : 'local'}"><i></i>${p.cloudEnabled ? 'Cloud' : 'Local'}</span>
       <div class="project__foot">
         <span class="project__date">Opened ${date}</span>
         <div class="project__row-actions">
@@ -787,27 +788,32 @@ function renderTabs() {
     closeEl.addEventListener('click', (e) => { e.stopPropagation(); closeTab(tab.path); });
 
     tabEl.append(iconEl, labelEl, closeEl);
+    tabEl.dataset.path = tab.path;
+    tabEl.title = tab.path;
     tabEl.addEventListener('click', () => activateTab(tab.path));
+    tabEl.addEventListener('auxclick', (e) => { if (e.button === 1) closeTab(tab.path); });
     tabBarEl.appendChild(tabEl);
   }
 }
 
-function closeTab(filePath) {
+// save:false = don't flush pending edits (the file is being deleted, or
+// changed on disk) — flushing would silently re-create a deleted file.
+function closeTab(filePath, { save = true } = {}) {
   const idx = openTabs.findIndex((t) => t.path === filePath);
   if (idx !== -1) openTabs.splice(idx, 1);
   if (activeTabPath === filePath) {
-    teardownActiveWorkspace();
+    teardownActiveWorkspace({ save });
     const next = openTabs[openTabs.length - 1];
     if (next) activateTab(next.path);
   }
   renderTabs();
 }
 
-function teardownActiveWorkspace() {
+function teardownActiveWorkspace({ save = true } = {}) {
   // Flush any pending edit to disk before tearing down — otherwise a switch
   // right after typing (before the 800ms autosave debounce fires) would
   // silently drop it.
-  if (activeWorkspace && activeTabPath) saveActiveFile(activeTabPath);
+  if (save && activeWorkspace && activeTabPath) saveActiveFile(activeTabPath);
   if (activePresence) activePresence.destroy();
   if (activeWorkspace) activeWorkspace.destroy();
   activePresence = null;
@@ -816,6 +822,7 @@ function teardownActiveWorkspace() {
   editorContainerEl.innerHTML = ''; // shows the :empty hint
   updateFileMeta();
   languageSupport?.refreshStatus();
+  breadcrumbs?.setEditor(null);
 }
 
 function activateTab(filePath) {
@@ -846,6 +853,7 @@ async function activateTabInner(filePath) {
   activeWorkspace = new CollaborativeWorkspace(editorContainerEl, {
     docId, filePath, currentUser, collaborative: project.cloudEnabled
   }).initialize(content, getTheme());
+  activeWorkspace.diskText = content; // last text known to be on disk
 
   if (project.cloudEnabled) {
     activePresence = new PresenceBar(presenceListEl, activeWorkspace.getAwareness(), currentUser);
@@ -858,6 +866,7 @@ async function activateTabInner(filePath) {
   updateFileMeta();
 
   pluginHost.emit('open', { path: filePath, language: activeWorkspace.languageId() });
+  breadcrumbs.setEditor(activeWorkspace.editor, filePath);
   languageSupport.onFileOpened(activeWorkspace.editor.getModel());
 
   if (pendingReveal && samePath(pendingReveal.path, filePath)) {
@@ -882,7 +891,10 @@ async function saveActiveFile(filePath, { explicit = false } = {}) {
     try { await activeWorkspace.editor.getAction('editor.action.formatDocument')?.run(); } catch { /* formatter errors are toasted by the formatter */ }
     if (!activeWorkspace || activeTabPath !== filePath) return;
   }
-  window.electronAPI.writeFile(filePath, activeWorkspace.getValue()).then(() => {
+  const text = activeWorkspace.getValue();
+  const ws = activeWorkspace;
+  window.electronAPI.writeFile(filePath, text).then(() => {
+    ws.diskText = text;
     scm.refreshSoon();
     pluginHost.emit('save', { path: filePath });
     if (activeWorkspace && activeTabPath === filePath) languageSupport.onFileSaved(activeWorkspace.editor.getModel());
@@ -915,8 +927,12 @@ async function deleteNode(node) {
   });
   if (!ok) return;
   try {
+    // close the file (or every open file inside the folder) first, without
+    // the usual flush-to-disk, so the deleted file isn't written back
+    const inside = (p) => samePath(p, node.path) || p.toLowerCase().startsWith(node.path.toLowerCase().replace(/[\\/]+$/, '') + (node.path.includes('\\') ? '\\' : '/'));
+    for (const t of openTabs.filter((t) => inside(t.path))) closeTab(t.path, { save: false });
     await window.electronAPI.deleteEntry(node.path);
-    if (openTabs.some((t) => t.path === node.path)) closeTab(node.path);
+    toast(`Deleted ${node.name}`);
     refreshTree();
   } catch (err) {
     toast(`Failed to delete: ${cleanError(err)}`, 'error');
@@ -1019,37 +1035,143 @@ renameForm.addEventListener('submit', async (e) => {
   }
 });
 
-/* --- right-click context menu --- */
+/* --- right-click context menus (files, folders, empty explorer, tabs) --- */
+const relPath = (p) => (rootFolder ? p.slice(rootFolder.length).replace(/^[\\/]/, '') : p);
+const copyText = (text, what) => navigator.clipboard.writeText(text).then(() => toast(`${what} copied`)).catch(() => {});
+const revealInOs = (p) => window.electronAPI.revealPath(p).catch((err) => toast(cleanError(err), 'error'));
+function terminalAt(dir) {
+  go('editor');
+  if (!bottomPanel.isOpen() || bottomPanel.currentTab() !== 'terminal') bottomPanel.open('terminal');
+  terminal.create({ cwd: dir });
+}
+async function createIn(dir, type) {
+  selectedDir = dir;
+  showSide('explorer');
+  await startInlineCreate(type);
+}
+
+// Expand the tree down to a file/folder and select it ("Reveal in Explorer View").
+async function revealInTree(target) {
+  if (!rootFolder) return;
+  showSide('explorer');
+  const host = currentFileTreeEl();
+  if (!host) return;
+  const sep = rootFolder.includes('\\') ? '\\' : '/';
+  const parts = relPath(target).split(/[\\/]/).filter(Boolean);
+  let cur = rootFolder;
+  for (let i = 0; i < parts.length - 1; i++) {
+    cur = cur.replace(/[\\/]+$/, '') + sep + parts[i];
+    const el = findTreeNode(host, cur);
+    if (el && !el.classList.contains('expanded')) await toggleDirectory({ path: cur }, el);
+  }
+  const node = findTreeNode(host, target);
+  if (node) { selectTreeNode(node); node.scrollIntoView({ block: 'nearest' }); node.focus(); }
+}
+
+function nodeMenu(node) {
+  const isDir = node.type === 'directory';
+  const dir = isDir ? node.path : parentDir(node.path);
+  return [
+    ...(isDir
+      ? [{ label: 'New File…', onClick: () => createIn(dir, 'file') }, { label: 'New Folder…', onClick: () => createIn(dir, 'directory') }]
+      : [{ label: 'Open', onClick: () => openFile(node.path) }]),
+    '-',
+    { label: 'Reveal in File Explorer', onClick: () => revealInOs(node.path) },
+    { label: 'Open in Integrated Terminal', onClick: () => terminalAt(dir) },
+    '-',
+    { label: 'Copy Path', onClick: () => copyText(node.path, 'Path') },
+    { label: 'Copy Relative Path', onClick: () => copyText(relPath(node.path), 'Relative path') },
+    '-',
+    ...(isDir ? [] : [
+      { label: 'Save', kbd: 'Ctrl+S', disabled: node.path !== activeTabPath, onClick: () => saveActiveFile(node.path, { explicit: true }) },
+      { label: 'Save As…', onClick: () => saveFileAs(node.path) },
+      '-'
+    ]),
+    { label: 'Rename…', kbd: 'F2', onClick: () => openRenameModal(node) },
+    { label: 'Duplicate', onClick: () => duplicateNode(node) },
+    '-',
+    { label: 'Delete', kbd: 'Delete', danger: true, onClick: () => deleteNode(node) }
+  ];
+}
+
+function explorerBackgroundMenu() {
+  return [
+    { label: 'New File…', onClick: () => createIn(rootFolder, 'file') },
+    { label: 'New Folder…', onClick: () => createIn(rootFolder, 'directory') },
+    '-',
+    { label: 'Refresh Explorer', onClick: () => refreshTree() },
+    { label: 'Collapse Folders', onClick: () => collapseTree() },
+    '-',
+    { label: 'Reveal in File Explorer', onClick: () => revealInOs(rootFolder) },
+    { label: 'Open in Integrated Terminal', onClick: () => terminalAt(rootFolder) }
+  ];
+}
+
+function tabMenu(filePath) {
+  const idx = openTabs.findIndex((t) => t.path === filePath);
+  const closeMany = (list) => list.forEach((t) => closeTab(t.path));
+  return [
+    { label: 'Close', kbd: 'Ctrl+W', onClick: () => closeTab(filePath) },
+    { label: 'Close Others', disabled: openTabs.length < 2, onClick: () => closeMany(openTabs.filter((t) => t.path !== filePath)) },
+    { label: 'Close to the Right', disabled: idx === openTabs.length - 1, onClick: () => closeMany(openTabs.slice(idx + 1)) },
+    { label: 'Close All', onClick: () => closeMany([...openTabs]) },
+    '-',
+    { label: 'Copy Path', onClick: () => copyText(filePath, 'Path') },
+    { label: 'Copy Relative Path', onClick: () => copyText(relPath(filePath), 'Relative path') },
+    '-',
+    { label: 'Reveal in File Explorer', onClick: () => revealInOs(filePath) },
+    { label: 'Reveal in Explorer View', onClick: () => revealInTree(filePath) },
+    { label: 'Open in Integrated Terminal', onClick: () => terminalAt(parentDir(filePath)) }
+  ];
+}
+
 document.addEventListener('contextmenu', (e) => {
-  const el = e.target.closest('.file-tree-node');
-  if (!el || !el.dataset.path) return;
-  e.preventDefault();
-  showContextMenu(e.clientX, e.clientY, { path: el.dataset.path, type: el.dataset.type, name: el.dataset.name });
+  const node = e.target.closest('.file-tree-node');
+  if (node && node.dataset.path) {
+    e.preventDefault();
+    selectTreeNode(node);
+    return showMenu(e.clientX, e.clientY, nodeMenu({ path: node.dataset.path, type: node.dataset.type, name: node.dataset.name }));
+  }
+  const tab = e.target.closest('.tab[data-path]');
+  if (tab) { e.preventDefault(); return showMenu(e.clientX, e.clientY, tabMenu(tab.dataset.path)); }
+  if (rootFolder && e.target.closest('#panel-project-list')) { e.preventDefault(); return showMenu(e.clientX, e.clientY, explorerBackgroundMenu()); }
 });
 
-function showContextMenu(x, y, node) {
-  const items = [];
-  if (node.type === 'file') {
-    if (node.path === activeTabPath) items.push({ label: 'Save', icon: saveIconSvg(), onClick: () => saveActiveFile(node.path) });
-    items.push({ label: 'Save As…', icon: saveIconSvg(), onClick: () => saveFileAs(node.path) });
-  }
-  items.push({ label: 'Rename', icon: renameIconSvg(), onClick: () => openRenameModal(node) });
-  items.push({ label: 'Duplicate', icon: duplicateIconSvg(), onClick: () => duplicateNode(node) });
-  items.push({ label: 'Copy Path', icon: copyIconSvg(), onClick: () => copyNodePath(node) });
-  items.push({ label: 'Delete', icon: trashIconSvg(), danger: true, onClick: () => deleteNode(node) });
-
+// items: { label, kbd?, onClick, danger?, disabled? } | '-'
+function showMenu(x, y, items) {
   contextMenuEl.innerHTML = '';
   for (const item of items) {
+    if (item === '-') {
+      if (contextMenuEl.lastElementChild && !contextMenuEl.lastElementChild.classList.contains('menu-divider')) {
+        const d = document.createElement('div');
+        d.className = 'menu-divider';
+        contextMenuEl.appendChild(d);
+      }
+      continue;
+    }
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = item.danger ? 'context-menu-item danger' : 'context-menu-item';
-    btn.innerHTML = `<span class="btn-icon">${item.icon}</span>${item.label}`;
+    btn.disabled = !!item.disabled;
+    const label = document.createElement('span');
+    label.className = 'context-menu-label';
+    label.textContent = item.label;
+    btn.appendChild(label);
+    if (item.kbd) {
+      const k = document.createElement('span');
+      k.className = 'context-menu-kbd';
+      k.textContent = item.kbd;
+      btn.appendChild(k);
+    }
     btn.addEventListener('click', () => { hideContextMenu(); item.onClick(); });
     contextMenuEl.appendChild(btn);
   }
-  contextMenuEl.style.left = `${x}px`;
-  contextMenuEl.style.top = `${y}px`;
+  if (contextMenuEl.lastElementChild?.classList.contains('menu-divider')) contextMenuEl.lastElementChild.remove();
   contextMenuEl.hidden = false;
+  // keep the menu inside the window
+  const r = contextMenuEl.getBoundingClientRect();
+  contextMenuEl.style.left = `${Math.max(4, Math.min(x, window.innerWidth - r.width - 6))}px`;
+  contextMenuEl.style.top = `${Math.max(4, Math.min(y, window.innerHeight - r.height - 6))}px`;
 }
 function hideContextMenu() { contextMenuEl.hidden = true; }
 document.addEventListener('click', (e) => { if (!contextMenuEl.hidden && !contextMenuEl.contains(e.target)) hideContextMenu(); });
@@ -1164,10 +1286,29 @@ setInterval(() => { if (currentView === 'dashboard') renderDashboardCards(); }, 
 document.getElementById('themeBtn').addEventListener('click', () => applyTheme(getEffectiveTheme() === 'dark' ? 'light' : 'dark', { user: true }));
 document.querySelectorAll('[data-theme-set]').forEach((b) => b.addEventListener('click', () => applyTheme(b.dataset.themeSet, { user: true })));
 
-// `user` = the person chose light/dark (switch, settings, menu). That means
-// MulTeam's own look, so an installed color theme is turned off first.
+// `user` = the person chose light/dark (switch, settings, menu). With a
+// color theme active, that moves to the theme's own light/dark variant; if
+// it has none, ask before falling back to MulTeam's look.
 async function applyTheme(t, { user = false } = {}) {
-  if (user && await extensions.resetColorTheme()) toast('Switched back to the MulTeam theme');
+  if (user) {
+    const res = await extensions.switchColorThemeMode(t);
+    if (res?.switched) {
+      toast(`Switched to ${res.switched}`);
+      setTheme(t); // remember the preference too
+      document.querySelectorAll('[data-theme-set]').forEach((b) => b.classList.toggle('is-on', b.dataset.themeSet === t));
+      return;
+    }
+    if (res?.same) return;
+    if (res?.missing) {
+      const ok = await confirmDialog({
+        title: `${res.missing} has no ${t} version`,
+        message: `The installed theme only comes in ${t === 'light' ? 'dark' : 'light'}. Switch to MulTeam\u2019s own ${t} theme instead?`,
+        confirmLabel: `Use MulTeam ${t === 'light' ? 'Light' : 'Dark'}`
+      });
+      if (!ok) return;
+      await extensions.resetColorTheme();
+    }
+  }
   setTheme(t);
   setMonacoTheme(getEffectiveTheme());
   document.querySelectorAll('[data-theme-set]').forEach((b) => b.classList.toggle('is-on', b.dataset.themeSet === t));
@@ -1408,17 +1549,77 @@ function setSidebarCollapsed(collapsed) {
 const isSidebarCollapsed = () => document.getElementById('sidebar').classList.contains('is-collapsed');
 const sidebarResize = initSidebarResize({ setCollapsed: setSidebarCollapsed, isCollapsed: isSidebarCollapsed });
 
+// Explorer keyboard: F2 renames, Delete deletes the selected item
+document.getElementById('panel-project-list').addEventListener('keydown', (e) => {
+  const node = e.target.closest('.file-tree-node');
+  if (!node || !node.dataset.path || e.target.tagName === 'INPUT') return;
+  const info = { path: node.dataset.path, type: node.dataset.type, name: node.dataset.name };
+  if (e.key === 'F2') { e.preventDefault(); openRenameModal(info); }
+  if (e.key === 'Delete') { e.preventDefault(); deleteNode(info); }
+});
+
 // Files created/renamed/deleted outside the app (terminal, file manager,
 // git checkout…) show up without a manual refresh. Content-only changes
 // ('change' events, e.g. our own autosave) don't rebuild the tree.
 let externalChangeTimer = null;
-window.electronAPI.onFileExternalChange(({ path: watched, eventType }) => {
+let diskCheckTimer = null;
+let tabsCheckTimer = null;
+window.electronAPI.onFileExternalChange(({ path: watched, eventType, filename }) => {
   if (!rootFolder || !samePath(watched, rootFolder)) return;
   scm.refreshSoon();
+  const changed = filename ? joinPath(rootFolder, String(filename).replace(/\\/g, '/')) : null;
+  if (changed && activeTabPath && samePath(changed, activeTabPath)) {
+    clearTimeout(diskCheckTimer);
+    diskCheckTimer = setTimeout(syncActiveFromDisk, 200);
+  }
   if (eventType !== 'rename') return;
   clearTimeout(externalChangeTimer);
   externalChangeTimer = setTimeout(refreshTree, 250);
+  clearTimeout(tabsCheckTimer);
+  tabsCheckTimer = setTimeout(closeTabsWhoseFileIsGone, 350);
 });
+
+// The open file changed on disk (another app, the terminal, git, a plugin…).
+// Unchanged editor → reload in place (cursor kept). Unsaved edits → ask.
+let askingReload = false;
+async function syncActiveFromDisk() {
+  const ws = activeWorkspace;
+  const filePath = activeTabPath;
+  if (!ws || !filePath || project?.cloudEnabled) return; // cloud files sync through Yjs
+  let disk;
+  try { disk = await window.electronAPI.readFile(filePath); } catch { return closeTabsWhoseFileIsGone(); }
+  if (ws !== activeWorkspace || disk === ws.diskText) return; // our own save, or nothing new
+  const model = ws.editor.getModel();
+  const apply = () => {
+    const selections = ws.editor.getSelections();
+    ws.editor.pushUndoStop();
+    model.pushEditOperations(selections, [{ range: model.getFullModelRange(), text: disk }], () => selections);
+    ws.editor.pushUndoStop();
+    ws.diskText = disk;
+  };
+  if (model.getValue() === ws.diskText) { apply(); return; }
+  if (askingReload) return;
+  askingReload = true;
+  const name = filePath.split(/[\\/]/).pop();
+  const ok = await confirmDialog({
+    title: `${name} changed on disk`,
+    message: 'Another program changed this file while you have edits that aren\u2019t saved yet. Reload it from disk (your unsaved edits are dropped), or keep your version (saving will overwrite the disk version)?',
+    confirmLabel: 'Reload from disk'
+  });
+  askingReload = false;
+  if (ok && ws === activeWorkspace) apply();
+  else if (ws === activeWorkspace) ws.diskText = disk; // keep mine: don't ask again for this change
+}
+
+// Open files that were deleted or moved elsewhere close (without saving).
+async function closeTabsWhoseFileIsGone() {
+  const gone = [];
+  for (const t of [...openTabs]) {
+    try { await window.electronAPI.readFile(t.path); } catch { gone.push(t.path); }
+  }
+  for (const p of gone) closeTab(p, { save: false });
+  if (gone.length) toast(gone.length === 1 ? `${gone[0].split(/[\\/]/).pop()} was deleted or moved` : `${gone.length} open files were deleted or moved`, 'error');
+}
 
 document.getElementById('explorerActs').addEventListener('click', (e) => {
   const b = e.target.closest('[data-explorer]');
@@ -1621,6 +1822,13 @@ const extensions = initExtensions({
 });
 
 const formatting = initFormatting({ toast, confirmDialog, getRoot: () => rootFolder });
+
+const breadcrumbs = initBreadcrumbs({
+  getRoot: () => rootFolder,
+  getProjectName: () => project?.name,
+  lspSymbols: (model) => languageSupport.symbolsFor(model),
+  onReveal: (p) => revealInTree(p)
+});
 
 const languageSupport = initLanguageSupport({
   onCatalogChange: (catalog) => formatting.setCatalog(catalog),
