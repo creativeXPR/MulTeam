@@ -7,6 +7,7 @@
 // in real Web Workers — monacoEnv.js points Monaco at them and must load
 // before monaco-editor, hence the import order.
 import './monacoEnv.js';
+import { builtinSemanticRules } from './semanticTokens.js';
 import * as monaco from 'monaco-editor';
 import * as Y from 'yjs';
 import { MonacoBinding } from 'y-monaco';
@@ -79,7 +80,7 @@ function defineMulteamThemes() {
   monaco.editor.defineTheme('multeam-light', {
     base: 'vs',
     inherit: true,
-    rules: [],
+    rules: builtinSemanticRules(false),
     colors: {
       'editor.background': '#fbfcff',
       'editor.lineHighlightBackground': '#00000005',
@@ -96,7 +97,7 @@ function defineMulteamThemes() {
   monaco.editor.defineTheme('multeam-dark', {
     base: 'vs-dark',
     inherit: true,
-    rules: [],
+    rules: builtinSemanticRules(true),
     colors: {
       'editor.background': '#0e0f13',
       'editor.lineHighlightBackground': '#ffffff07',
@@ -230,6 +231,7 @@ export class EditorView {
       cursorSmoothCaretAnimation: 'on',
       scrollBeyondLastLine: false,
       renderLineHighlight: 'all',
+      'semanticHighlighting.enabled': true, // language-server colors for functions, params, properties…
       ...monacoOptionsFromSettings()
     });
     doc.attach(this.editor);

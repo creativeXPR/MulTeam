@@ -3,6 +3,7 @@
 // (offered as completions). Packages come from Open VSX via the main
 // process (main/extensions.js).
 import * as monaco from 'monaco-editor';
+import { SEMANTIC_KEYS } from './semanticTokens.js';
 import { setCustomEditorTheme, setMonacoTheme } from './editor.js';
 import { getTheme, getEffectiveTheme, setAppPalette, clearAppPalette, hasAppPalette } from './theme.js';
 import { getSettings, updateSettings } from './settings.js';
@@ -120,6 +121,29 @@ export function toMonacoTheme(vs, uiTheme) {
     for (const t of targets) { const h = best(t, 'fontStyle'); if (h) { fontStyle = h.fontStyle; break; } }
     // like VS Code, text the theme doesn't color uses its default foreground
     // (never Monaco's built-in vs/vs-dark token colors)
+    fg = fg || defaultFg;
+    if (fg || fontStyle !== undefined) rules.push({ token, ...(fg ? { foreground: fg } : {}), ...(fontStyle !== undefined ? { fontStyle } : {}) });
+  }
+  // semantic highlighting: the theme's own semanticTokenColors first, else
+  // the TextMate scopes VS Code falls back to
+  const sem = vs.semanticTokenColors || {};
+  const semStyle = (key) => {
+    const [type, mod] = key.split('.');
+    const v = sem[key] ?? (mod ? sem[`*.${mod}`] : undefined) ?? (mod ? undefined : sem[type]);
+    if (v === undefined || v === null) return null;
+    if (typeof v === 'string') return normalizeHex(v) ? { fg: normalizeHex(v) } : null;
+    const st = { fg: normalizeHex(v.foreground) };
+    const fs = [v.bold && 'bold', v.italic && 'italic', v.underline && 'underline'].filter(Boolean).join(' ');
+    if (typeof v.fontStyle === 'string') st.fontStyle = v.fontStyle;
+    else if (fs) st.fontStyle = fs;
+    return st.fg || st.fontStyle !== undefined ? st : null;
+  };
+  for (const [token, targets] of SEMANTIC_KEYS) {
+    const own = semStyle(token) || {};
+    let fg = own.fg || null;
+    let fontStyle = own.fontStyle;
+    if (!fg) for (const t of targets) { const h = best(t, 'fg'); if (h) { fg = h.fg; break; } }
+    if (fontStyle === undefined) for (const t of targets) { const h = best(t, 'fontStyle'); if (h) { fontStyle = h.fontStyle; break; } }
     fg = fg || defaultFg;
     if (fg || fontStyle !== undefined) rules.push({ token, ...(fg ? { foreground: fg } : {}), ...(fontStyle !== undefined ? { fontStyle } : {}) });
   }

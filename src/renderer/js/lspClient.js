@@ -1,8 +1,9 @@
 // Minimal Language Server Protocol client for Monaco. One instance per
 // running server (main/languages.js spawns it; messages travel over IPC).
 // Covers what matters day to day: document sync, completions (+resolve),
-// hover, signature help, go to definition and diagnostics.
+// hover, signature help, go to definition, semantic highlighting and diagnostics.
 import * as monaco from 'monaco-editor';
+import { MONACO_LEGEND, STANDARD_TYPES, STANDARD_MODIFIERS, makeRemapper } from './semanticTokens.js';
 
 const CompletionKind = monaco.languages.CompletionItemKind;
 // LSP CompletionItemKind (1-based) -> Monaco
@@ -77,6 +78,7 @@ export class LspClient {
     let result = null;
     if (msg.method === 'workspace/configuration') result = (msg.params?.items || []).map((it) => this.settingsFor(it.section));
     else if (msg.method === 'workspace/workspaceFolders') result = this.rootPath ? [{ uri: monaco.Uri.file(this.rootPath).toString(), name: this.rootPath.split(/[\\/]/).pop() }] : [];
+    else if (msg.method === 'workspace/semanticTokens/refresh') this.semanticChanged?.fire();
     // client/registerCapability, window/workDoneProgress/create … → null is fine
     this.send({ id: msg.id, result });
   }
@@ -109,11 +111,21 @@ export class LspClient {
           definition: { linkSupport: false },
           formatting: { dynamicRegistration: false },
           documentSymbol: { hierarchicalDocumentSymbolSupport: true },
+          semanticTokens: {
+            dynamicRegistration: false,
+            requests: { full: true, range: false },
+            tokenTypes: STANDARD_TYPES,
+            tokenModifiers: STANDARD_MODIFIERS,
+            formats: ['relative'],
+            overlappingTokenSupport: false,
+            multilineTokenSupport: false
+          },
           publishDiagnostics: { relatedInformation: false }
         }
       }
     }, 60000);
     this.capabilities = res?.capabilities || {};
+    if (!this.semanticChanged) this.semanticChanged = new monaco.Emitter();
     this.notify('initialized', {});
     this.registerProviders();
     // pick up models that are already open
@@ -241,7 +253,30 @@ export class LspClient {
       if (caps.definitionProvider) {
         this.disposables.push(monaco.languages.registerDefinitionProvider(lang, { provideDefinition: (model, position) => this.definition(model, position) }));
       }
+      const sem = caps.semanticTokensProvider;
+      if (sem?.full && sem.legend) {
+        this.remapSemantic = this.remapSemantic || makeRemapper(sem.legend);
+        this.disposables.push(monaco.languages.registerDocumentSemanticTokensProvider(lang, {
+          onDidChange: this.semanticChanged.event,
+          getLegend: () => MONACO_LEGEND,
+          provideDocumentSemanticTokens: (model) => this.semanticTokens(model),
+          releaseDocumentSemanticTokens: () => {}
+        }));
+      }
     }
+  }
+
+  // Semantic tokens (functions, parameters, properties…) remapped onto
+  // MulTeam's style keys — see semanticTokens.js.
+  async semanticTokens(model) {
+    if (!this.handles(model) || !this.remapSemantic) return null;
+    this.sync(model);
+    const version = model.getVersionId();
+    try {
+      const res = await this.request('textDocument/semanticTokens/full', { textDocument: { uri: model.uri.toString() } }, 10000);
+      if (!res?.data || model.isDisposed() || model.getVersionId() !== version) return null;
+      return { data: this.remapSemantic(res.data) };
+    } catch { return null; }
   }
 
   position(model, position) {
