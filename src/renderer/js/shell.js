@@ -1,6 +1,6 @@
 import { watchAuthState, watchCloudConnection, signOut, createCloudProject, deleteCloudProject, upsertDocumentMeta } from './firebase.js';
 import { requireAuth, openSignIn } from './authModal.js';
-import { CollaborativeWorkspace, setMonacoTheme } from './editor.js';
+import { FileDocument, EditorView, setMonacoTheme } from './editor.js';
 import { PresenceBar } from './presence.js';
 import { applyStoredTheme, setTheme, getTheme, getEffectiveTheme, setAccent, getAccent } from './theme.js';
 import { getSettings, updateSettings, monacoOptionsFromSettings } from './settings.js';
@@ -39,8 +39,6 @@ const views = {
 const navBtns = [...document.querySelectorAll('.sidearray .ibtn[data-nav]')];
 
 const fileTreeHostId = 'panel-project-list';
-const tabBarEl = document.getElementById('tab-bar');
-const editorContainerEl = document.getElementById('monaco-container');
 const presenceListEl = document.getElementById('presence-list');
 const statusDotEl = document.getElementById('status-dot');
 const lineCountEl = document.getElementById('line-count');
@@ -61,11 +59,12 @@ let wsFilter = 'all';
 
 let project = null; // currently open project, or null
 let rootFolder = null;
+// The FOCUSED editor group's view and file (kept under these names so the
+// rest of the app — menus, plugins, formatting, problems — stays unchanged).
 let activeWorkspace = null;
 let activePresence = null;
 let activeTabPath = null;
 let projectOpenedAt = null;
-const openTabs = []; // [{ path }]
 let pendingReveal = null; // { path, line, column, length } applied once that file finishes opening
 
 /* ============================================================
@@ -572,7 +571,7 @@ async function openProjectView(p) {
   rootFolder = p.folderPath;
   projectOpenedAt = Date.now();
   projectNameLabel.textContent = p.name;
-  editorContainerEl.dataset.empty = 'Open a file from the sidebar';
+  setEmptyHints();
   window.electronAPI.updateProject(p.id, { lastOpenedAt: Date.now() });
 
   renderPanelProjects(); // mounts #file-tree under this project's panel row
@@ -588,14 +587,12 @@ function closeProjectView() {
   selectedTreePath = null;
   selectedDir = null;
   document.getElementById('explorerActs').hidden = true;
-  teardownActiveWorkspace();
-  openTabs.length = 0;
-  renderTabs();
+  closeAllEditors({ save: true });
   project = null;
   rootFolder = null;
   projectOpenedAt = null;
   projectNameLabel.textContent = '';
-  editorContainerEl.dataset.empty = 'Open a project from the sidebar';
+  setEmptyHints();
   renderPanelProjects();
   scm.refresh();
 }
@@ -662,6 +659,14 @@ async function loadFileTree(dirPath, container, { quiet = false } = {}) {
     labelEl.textContent = node.name;
 
     el.append(chevronEl, iconEl, labelEl);
+    if (node.type === 'file') {
+      el.draggable = true;
+      el.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData(FILE_MIME, node.path);
+        e.dataTransfer.setData('text/plain', node.path);
+        e.dataTransfer.effectAllowed = 'move';
+      });
+    }
     el.addEventListener('click', () => {
       selectTreeNode(el);
       if (node.type === 'directory') toggleDirectory(node, el);
@@ -749,6 +754,354 @@ function sanitizeDocId(relativePath) {
 
 function currentFileTreeEl() { return document.getElementById('file-tree'); }
 
+/* ============================================================
+   Editor groups (VS Code style splits). Each group has its own tabs and
+   shows one editor at a time; a FileDocument (text model + collaboration +
+   the copy on disk) is shared by every group showing that file.
+   Layout is a tree: { type:'group', id } | { type:'split', dir:'row'|'col', a, b, ratio }.
+   ============================================================ */
+const gridEl = document.getElementById('editorGrid');
+const documents = new Map();   // pathKey → { doc, opening, saveTimer, sub }
+const groups = new Map();      // id → group
+let groupSeq = 0;
+let focusedGroup = null;
+let layout = null;
+const pathKey = (p) => String(p).replace(/\\/g, '/').toLowerCase();
+const TAB_MIME = 'application/x-multeam-tab';
+const FILE_MIME = 'application/x-multeam-file';
+const GICON = {
+  right: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M12 4.5v15"/></svg>',
+  down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M3.5 12h17"/></svg>',
+  close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></svg>'
+};
+
+function setEmptyHints() {
+  for (const g of groups.values()) g.editorEl.dataset.empty = rootFolder ? 'Open a file from the sidebar' : 'Open a project from the sidebar';
+}
+
+// ---------- groups ----------
+function createGroup() {
+  const id = ++groupSeq;
+  const el = document.createElement('section');
+  el.className = 'egroup';
+  el.dataset.group = String(id);
+  el.innerHTML = `<div class="egroup__head">
+      <div class="tab-bar" role="tablist"></div>
+      <div class="egroup__acts">
+        <button type="button" class="ibtn" data-gact="split-right" title="Split Editor Right (Ctrl+\\)">${GICON.right}</button>
+        <button type="button" class="ibtn" data-gact="split-down" title="Split Editor Down">${GICON.down}</button>
+        <button type="button" class="ibtn" data-gact="close-group" title="Close Group">${GICON.close}</button>
+      </div>
+    </div>
+    <nav class="crumbs" aria-label="Breadcrumbs"></nav>
+    <div class="egroup__editor"></div>
+    <div class="egroup__drop" hidden></div>`;
+  const g = { id, el, tabBar: el.querySelector('.tab-bar'), editorEl: el.querySelector('.egroup__editor'), dropEl: el.querySelector('.egroup__drop'), tabs: [], activePath: null, view: null };
+  g.editorEl.dataset.empty = rootFolder ? 'Open a file from the sidebar' : 'Open a project from the sidebar';
+  g.crumbs = initBreadcrumbs({
+    el: el.querySelector('.crumbs'),
+    getRoot: () => rootFolder,
+    getProjectName: () => project?.name,
+    lspSymbols: (model) => languageSupport.symbolsFor(model),
+    onReveal: (p) => revealInTree(p)
+  });
+  el.addEventListener('pointerdown', () => focusGroup(g), true);
+  el.querySelector('.egroup__acts').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-gact]');
+    if (!b) return;
+    if (b.dataset.gact === 'split-right') splitEditor(g, 'right');
+    if (b.dataset.gact === 'split-down') splitEditor(g, 'bottom');
+    if (b.dataset.gact === 'close-group') closeGroup(g);
+  });
+  wireGroupDnD(g);
+  groups.set(id, g);
+  return g;
+}
+
+function focusGroup(g) {
+  if (!g || !groups.has(g.id)) return;
+  if (focusedGroup !== g) {
+    focusedGroup = g;
+    for (const x of groups.values()) x.el.classList.toggle('is-focused', x === g);
+  }
+  syncActive();
+}
+
+// keep the legacy "active" names pointing at the focused group
+function syncActive() {
+  const g = focusedGroup;
+  activeWorkspace = g?.view || null;
+  const prevPath = activeTabPath;
+  activeTabPath = g?.activePath || null;
+  // the Explorer highlight follows the focused editor (like VS Code)
+  if (activeTabPath && activeTabPath !== prevPath) {
+    const host = currentFileTreeEl();
+    const node = host && findTreeNode(host, activeTabPath);
+    if (node) selectTreeNode(node);
+  }
+  updateFileMeta();
+  languageSupport.refreshStatus();
+  const aw = activeWorkspace?.getAwareness();
+  if (activePresence?.awareness !== aw) {
+    activePresence?.destroy();
+    activePresence = null;
+    presenceListEl.innerHTML = '';
+    if (aw && currentUser) activePresence = new PresenceBar(presenceListEl, aw, currentUser);
+  }
+}
+
+function orderedGroups(node = layout, out = []) {
+  if (!node) return out;
+  if (node.type === 'group') { if (groups.has(node.id)) out.push(groups.get(node.id)); return out; }
+  orderedGroups(node.a, out);
+  return orderedGroups(node.b, out);
+}
+
+function findLeaf(node, id, parent = null) {
+  if (!node) return null;
+  if (node.type === 'group') return node.id === id ? { leaf: node, parent } : null;
+  return findLeaf(node.a, id, node) || findLeaf(node.b, id, node);
+}
+
+function replaceNode(node, next) {
+  for (const k of Object.keys(node)) delete node[k];
+  Object.assign(node, next);
+}
+
+function resetLayout() {
+  for (const g of groups.values()) { g.view?.destroy(); g.el.remove(); }
+  groups.clear();
+  const g = createGroup();
+  layout = { type: 'group', id: g.id };
+  focusedGroup = null;
+  renderLayout();
+  focusGroup(g);
+}
+
+// Split `target` and return the new (empty) group placed on `zone`'s side.
+function splitGroup(target, zone) {
+  const found = findLeaf(layout, target.id);
+  if (!found) return null;
+  const g = createGroup();
+  const oldLeaf = { type: 'group', id: target.id };
+  const newLeaf = { type: 'group', id: g.id };
+  const before = zone === 'left' || zone === 'top';
+  replaceNode(found.leaf, { type: 'split', dir: zone === 'left' || zone === 'right' ? 'row' : 'col', a: before ? newLeaf : oldLeaf, b: before ? oldLeaf : newLeaf, ratio: 0.5 });
+  renderLayout();
+  return g;
+}
+
+function removeGroup(g) {
+  if (groups.size <= 1 || !groups.has(g.id)) return;
+  const found = findLeaf(layout, g.id);
+  if (found?.parent) {
+    const sibling = found.parent.a === found.leaf ? found.parent.b : found.parent.a;
+    replaceNode(found.parent, { ...sibling });
+  }
+  g.view?.destroy();
+  groups.delete(g.id);
+  g.el.remove();
+  if (focusedGroup === g) { focusedGroup = null; focusGroup(orderedGroups()[0]); }
+  renderLayout();
+}
+
+function renderLayout() {
+  gridEl.replaceChildren(buildNode(layout));
+  const only = groups.size === 1;
+  for (const g of groups.values()) g.el.classList.toggle('is-only', only);
+}
+
+function buildNode(node) {
+  if (node.type === 'group') return groups.get(node.id).el;
+  const box = document.createElement('div');
+  box.className = `esplit ${node.dir}`;
+  const pane = (child, r) => { const p = document.createElement('div'); p.className = 'esplit__pane'; p.style.flex = `${r} 1 0`; p.append(child); return p; };
+  const a = pane(buildNode(node.a), node.ratio);
+  const b = pane(buildNode(node.b), 1 - node.ratio);
+  const sash = document.createElement('div');
+  sash.className = 'esplit__sash';
+  sash.title = 'Drag to resize';
+  sash.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    try { sash.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ }
+    const rect = box.getBoundingClientRect();
+    document.body.classList.add(node.dir === 'row' ? 'is-resizing-h' : 'is-resizing-v');
+    const move = (ev) => {
+      const r = node.dir === 'row' ? (ev.clientX - rect.left) / rect.width : (ev.clientY - rect.top) / rect.height;
+      node.ratio = Math.min(0.85, Math.max(0.15, r));
+      a.style.flex = `${node.ratio} 1 0`;
+      b.style.flex = `${1 - node.ratio} 1 0`;
+    };
+    const up = () => { sash.removeEventListener('pointermove', move); document.body.classList.remove('is-resizing-h', 'is-resizing-v'); };
+    sash.addEventListener('pointermove', move);
+    sash.addEventListener('pointerup', up, { once: true });
+    sash.addEventListener('lostpointercapture', up, { once: true });
+  });
+  sash.addEventListener('dblclick', () => { node.ratio = 0.5; a.style.flex = '0.5 1 0'; b.style.flex = '0.5 1 0'; });
+  box.append(a, sash, b);
+  return box;
+}
+
+// "Split Editor Right/Down": the current file opens again beside it
+function splitEditor(g = focusedGroup, zone = 'right') {
+  if (!g) return;
+  const path = g.activePath;
+  const ng = splitGroup(g, zone);
+  if (ng && path) openFile(path, { group: ng });
+  else if (ng) focusGroup(ng);
+}
+
+function closeGroup(g = focusedGroup) {
+  if (!g) return;
+  for (const p of [...g.tabs]) closeTab(p, { group: g });
+  if (groups.has(g.id)) removeGroup(g);
+}
+
+// ---------- documents (one per open file, shared across groups) ----------
+async function openDoc(filePath) {
+  const key = pathKey(filePath);
+  const existing = documents.get(key);
+  if (existing) return existing.doc || existing.opening;
+  const rec = { doc: null, saveTimer: null, sub: null };
+  rec.opening = (async () => {
+    const content = await window.electronAPI.readFile(filePath);
+    const rel = filePath.slice(rootFolder.length).replace(/^[\\/]/, '');
+    const docId = sanitizeDocId(rel);
+    const doc = new FileDocument(filePath, { docId, currentUser, collaborative: !!project?.cloudEnabled }).init(content);
+    rec.doc = doc;
+    rec.opening = null;
+    rec.sub = doc.model.onDidChangeContent(() => {
+      updateFileMeta();
+      if (!getSettings().autosave) return;
+      clearTimeout(rec.saveTimer);
+      rec.saveTimer = setTimeout(() => saveActiveFile(doc.filePath), 800);
+    });
+    if (project?.cloudEnabled) {
+      upsertDocumentMeta(docId, { projectId: project.id, ownerId: currentUser.uid, path: rel, language: doc.model.getLanguageId(), userId: currentUser.uid });
+    }
+    return doc;
+  })();
+  documents.set(key, rec);
+  try { return await rec.opening; } catch (err) { documents.delete(key); throw err; }
+}
+
+const shownAnywhere = (p) => [...groups.values()].some((g) => g.activePath && samePath(g.activePath, p));
+
+function writeDoc(doc) {
+  const text = doc.getValue();
+  return window.electronAPI.writeFile(doc.filePath, text).then(() => { doc.diskText = text; });
+}
+
+// Drop a file's document once no group shows it (saving pending edits first).
+function releaseDoc(filePath, { save = true } = {}) {
+  if (shownAnywhere(filePath)) return;
+  const key = pathKey(filePath);
+  const rec = documents.get(key);
+  if (!rec?.doc) return;
+  clearTimeout(rec.saveTimer);
+  if (save) writeDoc(rec.doc).catch(() => {});
+  rec.sub?.dispose();
+  rec.doc.destroy();
+  documents.delete(key);
+}
+
+function closeAllEditors({ save = true } = {}) {
+  for (const g of groups.values()) { g.view?.destroy(); g.view = null; g.activePath = null; g.tabs = []; }
+  for (const rec of documents.values()) {
+    clearTimeout(rec.saveTimer);
+    if (save && rec.doc) writeDoc(rec.doc).catch(() => {});
+    rec.sub?.dispose();
+    rec.doc?.destroy();
+  }
+  documents.clear();
+  resetLayout();
+}
+
+// ---------- tabs ----------
+function renderGroupTabs(g) {
+  g.tabBar.innerHTML = '';
+  for (const p of g.tabs) {
+    const name = p.split(/[\\/]/).pop();
+    const tabEl = document.createElement('div');
+    tabEl.className = `tab ${g.activePath && samePath(p, g.activePath) ? 'active' : ''}`;
+    tabEl.draggable = true;
+    tabEl.dataset.path = p;
+    tabEl.title = p;
+
+    const iconEl = document.createElement('span');
+    iconEl.className = 'tab-icon';
+    iconEl.innerHTML = fileIcon(name);
+    const labelEl = document.createElement('span');
+    labelEl.className = 'tab-label';
+    labelEl.textContent = name;
+    const closeEl = document.createElement('span');
+    closeEl.className = 'tab-close';
+    closeEl.textContent = '×';
+    closeEl.addEventListener('click', (e) => { e.stopPropagation(); closeTab(p, { group: g }); });
+
+    tabEl.append(iconEl, labelEl, closeEl);
+    tabEl.addEventListener('click', () => { focusGroup(g); activateTab(p, g); });
+    tabEl.addEventListener('auxclick', (e) => { if (e.button === 1) closeTab(p, { group: g }); });
+    tabEl.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData(TAB_MIME, JSON.stringify({ group: g.id, path: p }));
+      e.dataTransfer.setData('text/plain', p);
+      e.dataTransfer.effectAllowed = 'move';
+      tabEl.classList.add('is-dragging');
+    });
+    tabEl.addEventListener('dragend', () => { tabEl.classList.remove('is-dragging'); clearAllDropMarks(); });
+    g.tabBar.appendChild(tabEl);
+  }
+  g.el.classList.toggle('has-tabs', g.tabs.length > 0);
+}
+
+function renderTabs() { for (const g of groups.values()) renderGroupTabs(g); }
+
+async function showInGroup(g, filePath) {
+  if (!g || !groups.has(g.id)) return;
+  if (g.view && g.activePath && samePath(g.activePath, filePath)) { if (focusedGroup === g) syncActive(); return; }
+  const prev = g.activePath;
+  g.view?.destroy();
+  g.view = null;
+  g.activePath = filePath;
+  g.crumbs.setEditor(null);
+  renderGroupTabs(g);
+  if (prev && !samePath(prev, filePath)) releaseDoc(prev);
+  if (focusedGroup === g) syncActive();
+  renderLoader(g.editorEl);
+
+  let doc;
+  try { doc = await openDoc(filePath); } catch (err) { g.editorEl.textContent = `Failed to open file: ${cleanError(err)}`; return; }
+  if (!groups.has(g.id) || !g.activePath || !samePath(g.activePath, filePath) || g.view) return;
+
+  g.editorEl.innerHTML = '';
+  g.view = new EditorView(g.editorEl, doc, getEffectiveTheme());
+  g.view.editor.onDidFocusEditorWidget(() => focusGroup(g));
+  g.crumbs.setEditor(g.view.editor, filePath);
+  if (focusedGroup === g) syncActive();
+  pluginHost.emit('open', { path: filePath, language: g.view.languageId() });
+  languageSupport.onFileOpened(doc.model);
+  if (pendingReveal && samePath(pendingReveal.path, filePath) && focusedGroup === g) {
+    g.view.revealPosition(pendingReveal.line, pendingReveal.column, pendingReveal.length);
+    pendingReveal = null;
+  }
+}
+
+function activateTab(filePath, group = focusedGroup) {
+  if (!group) return;
+  if (project?.cloudEnabled) requireAuth(() => showInGroup(group, filePath));
+  else showInGroup(group, filePath);
+}
+
+async function openFile(filePath, { group = focusedGroup, index } = {}) {
+  if (!group) return;
+  if (!group.tabs.some((p) => samePath(p, filePath))) {
+    const at = index === undefined ? group.tabs.length : Math.max(0, Math.min(index, group.tabs.length));
+    group.tabs.splice(at, 0, filePath);
+  }
+  focusGroup(group);
+  activateTab(filePath, group);
+}
+
 // Opens a file (if needed) and puts the cursor at line/column — used by
 // Problems, find-in-files and anything else that points into a file.
 function openFileAt(filePath, line, column, length = 0) {
@@ -761,152 +1114,190 @@ function openFileAt(filePath, line, column, length = 0) {
   openFile(filePath);
 }
 
-async function openFile(filePath) {
-  if (!openTabs.some((t) => t.path === filePath)) openTabs.push({ path: filePath });
-  renderTabs();
-  activateTab(filePath);
-}
-
-function renderTabs() {
-  tabBarEl.innerHTML = '';
-  for (const tab of openTabs) {
-    const name = tab.path.split(/[\\/]/).pop();
-    const tabEl = document.createElement('div');
-    tabEl.className = `tab ${tab.path === activeTabPath ? 'active' : ''}`;
-
-    const iconEl = document.createElement('span');
-    iconEl.className = 'tab-icon';
-    iconEl.innerHTML = fileIcon(name);
-
-    const labelEl = document.createElement('span');
-    labelEl.className = 'tab-label';
-    labelEl.textContent = name;
-
-    const closeEl = document.createElement('span');
-    closeEl.className = 'tab-close';
-    closeEl.textContent = '×';
-    closeEl.addEventListener('click', (e) => { e.stopPropagation(); closeTab(tab.path); });
-
-    tabEl.append(iconEl, labelEl, closeEl);
-    tabEl.dataset.path = tab.path;
-    tabEl.title = tab.path;
-    tabEl.addEventListener('click', () => activateTab(tab.path));
-    tabEl.addEventListener('auxclick', (e) => { if (e.button === 1) closeTab(tab.path); });
-    tabBarEl.appendChild(tabEl);
-  }
-}
-
-// save:false = don't flush pending edits (the file is being deleted, or
+// save:false = don't flush pending edits (the file is being deleted or was
 // changed on disk) — flushing would silently re-create a deleted file.
-function closeTab(filePath, { save = true } = {}) {
-  const idx = openTabs.findIndex((t) => t.path === filePath);
-  if (idx !== -1) openTabs.splice(idx, 1);
-  if (activeTabPath === filePath) {
-    teardownActiveWorkspace({ save });
-    const next = openTabs[openTabs.length - 1];
-    if (next) activateTab(next.path);
+function closeTab(filePath, { group = focusedGroup, save = true } = {}) {
+  if (!group || !filePath) return;
+  const idx = group.tabs.findIndex((p) => samePath(p, filePath));
+  if (idx === -1) return;
+  group.tabs.splice(idx, 1);
+  if (group.activePath && samePath(group.activePath, filePath)) {
+    group.view?.destroy();
+    group.view = null;
+    group.activePath = null;
+    group.crumbs.setEditor(null);
+    group.editorEl.innerHTML = '';
+    releaseDoc(filePath, { save });
+    const next = group.tabs[Math.min(idx, group.tabs.length - 1)];
+    if (next) activateTab(next, group);
+    else if (groups.size > 1) { removeGroup(group); return; }
   }
-  renderTabs();
+  renderGroupTabs(group);
+  if (focusedGroup === group) syncActive();
 }
 
-function teardownActiveWorkspace({ save = true } = {}) {
-  // Flush any pending edit to disk before tearing down — otherwise a switch
-  // right after typing (before the 800ms autosave debounce fires) would
-  // silently drop it.
-  if (save && activeWorkspace && activeTabPath) saveActiveFile(activeTabPath);
-  if (activePresence) activePresence.destroy();
-  if (activeWorkspace) activeWorkspace.destroy();
-  activePresence = null;
-  activeWorkspace = null;
-  activeTabPath = null;
-  editorContainerEl.innerHTML = ''; // shows the :empty hint
-  updateFileMeta();
-  languageSupport?.refreshStatus();
-  breadcrumbs?.setEditor(null);
+function closeEverywhere(filePath, opts = {}) {
+  for (const g of [...groups.values()]) if (g.tabs.some((p) => samePath(p, filePath))) closeTab(filePath, { ...opts, group: g });
 }
 
-function activateTab(filePath) {
-  if (activeTabPath === filePath) return;
-  if (project.cloudEnabled) requireAuth(() => activateTabInner(filePath));
-  else activateTabInner(filePath);
+function allOpenPaths() {
+  const seen = new Map();
+  for (const g of groups.values()) for (const p of g.tabs) seen.set(pathKey(p), p);
+  return [...seen.values()];
 }
 
-// NOTE: only one file is "live" (bound to Yjs/Monaco) at a time — see the
-// scope note in the plan. Opening a different project tears the previous
-// one's workspace down first (closeProjectView).
-async function activateTabInner(filePath) {
-  teardownActiveWorkspace();
-  activeTabPath = filePath;
-  renderTabs();
-  renderLoader(editorContainerEl);
-
-  let content;
-  try { content = await window.electronAPI.readFile(filePath); }
-  catch (err) { editorContainerEl.textContent = `Failed to open file: ${err.message}`; return; }
-
-  if (activeTabPath !== filePath) return;
-
-  const relativePath = filePath.slice(rootFolder.length).replace(/^[\\/]/, '');
-  const docId = sanitizeDocId(relativePath);
-
-  editorContainerEl.innerHTML = '';
-  activeWorkspace = new CollaborativeWorkspace(editorContainerEl, {
-    docId, filePath, currentUser, collaborative: project.cloudEnabled
-  }).initialize(content, getTheme());
-  activeWorkspace.diskText = content; // last text known to be on disk
-
-  if (project.cloudEnabled) {
-    activePresence = new PresenceBar(presenceListEl, activeWorkspace.getAwareness(), currentUser);
-    upsertDocumentMeta(docId, {
-      projectId: project.id, ownerId: currentUser.uid, path: relativePath,
-      language: activeWorkspace.editor.getModel().getLanguageId(), userId: currentUser.uid
-    });
+// Move a tab within its group (reorder) or into another group.
+function moveTab(from, filePath, to, index) {
+  if (!from || !to) return;
+  if (from === to) {
+    const i = from.tabs.findIndex((p) => samePath(p, filePath));
+    if (i === -1) return;
+    from.tabs.splice(i, 1);
+    let at = index === undefined ? from.tabs.length : index;
+    if (at > i) at -= 1;
+    from.tabs.splice(Math.max(0, Math.min(at, from.tabs.length)), 0, filePath);
+    renderGroupTabs(from);
+    return;
   }
-
-  updateFileMeta();
-
-  pluginHost.emit('open', { path: filePath, language: activeWorkspace.languageId() });
-  breadcrumbs.setEditor(activeWorkspace.editor, filePath);
-  languageSupport.onFileOpened(activeWorkspace.editor.getModel());
-
-  if (pendingReveal && samePath(pendingReveal.path, filePath)) {
-    activeWorkspace.revealPosition(pendingReveal.line, pendingReveal.column, pendingReveal.length);
-    pendingReveal = null;
+  if (!to.tabs.some((p) => samePath(p, filePath))) {
+    const at = index === undefined ? to.tabs.length : Math.max(0, Math.min(index, to.tabs.length));
+    to.tabs.splice(at, 0, filePath);
   }
-
-  let saveTimer = null;
-  activeWorkspace.editor.onDidChangeModelContent(() => {
-    updateFileMeta();
-    if (!getSettings().autosave) return;
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => saveActiveFile(filePath), 800);
-  });
+  focusGroup(to);
+  // show it in the destination first so its document stays alive, then
+  // take it out of the source group
+  const shown = project?.cloudEnabled ? new Promise((r) => requireAuth(() => showInGroup(to, filePath).then(r))) : showInGroup(to, filePath);
+  Promise.resolve(shown).then(() => closeTab(filePath, { group: from }));
+  renderGroupTabs(to);
 }
 
+// ---------- drag & drop: reorder tabs, move between groups, split ----------
+function zoneAt(g, e) {
+  const r = g.editorEl.getBoundingClientRect();
+  if (!r.width || !r.height) return 'center';
+  const x = (e.clientX - r.left) / r.width;
+  const y = (e.clientY - r.top) / r.height;
+  const [side, dist] = Object.entries({ left: x, right: 1 - x, top: y, bottom: 1 - y }).sort((a, b) => a[1] - b[1])[0];
+  return dist < 0.25 ? side : 'center';
+}
+
+function tabInsertIndex(g, clientX) {
+  const tabsEls = [...g.tabBar.querySelectorAll('.tab')];
+  const i = tabsEls.findIndex((t) => { const r = t.getBoundingClientRect(); return clientX < r.left + r.width / 2; });
+  return i === -1 ? tabsEls.length : i;
+}
+
+function markTabInsert(g, clientX) {
+  const tabsEls = [...g.tabBar.querySelectorAll('.tab')];
+  const i = tabInsertIndex(g, clientX);
+  tabsEls.forEach((t, k) => { t.classList.toggle('drop-before', k === i); t.classList.toggle('drop-after', i === tabsEls.length && k === tabsEls.length - 1); });
+  g.tabBar.classList.toggle('drop-empty', !tabsEls.length);
+}
+
+function clearAllDropMarks() {
+  for (const g of groups.values()) {
+    g.dropEl.hidden = true;
+    g.tabBar.classList.remove('drop-empty');
+    g.tabBar.querySelectorAll('.drop-before, .drop-after').forEach((t) => t.classList.remove('drop-before', 'drop-after'));
+  }
+}
+
+const isOurDrag = (e) => { const t = [...(e.dataTransfer?.types || [])]; return t.includes(TAB_MIME) || t.includes(FILE_MIME); };
+
+function wireGroupDnD(g) {
+  // capture phase: Monaco has its own drag handling for text
+  g.el.addEventListener('dragover', (e) => {
+    if (!isOurDrag(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    clearAllDropMarks();
+    if (e.target.closest('.egroup__head')) markTabInsert(g, e.clientX);
+    else { g.dropEl.hidden = false; g.dropEl.className = `egroup__drop zone-${zoneAt(g, e)}`; }
+  }, true);
+  g.el.addEventListener('drop', (e) => {
+    if (!isOurDrag(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const inHead = !!e.target.closest('.egroup__head');
+    const index = inHead ? tabInsertIndex(g, e.clientX) : undefined;
+    const zone = inHead ? 'center' : zoneAt(g, e);
+    clearAllDropMarks();
+    handleDrop(e.dataTransfer, g, zone, index);
+  }, true);
+}
+
+function handleDrop(dt, g, zone, index) {
+  const rawTab = dt.getData(TAB_MIME);
+  const file = dt.getData(FILE_MIME);
+  if (rawTab) {
+    const { group: fromId, path: p } = JSON.parse(rawTab);
+    const from = groups.get(fromId);
+    if (!from) return;
+    if (zone !== 'center' && from === g && from.tabs.length === 1) return; // splitting a group off its only tab changes nothing
+    const target = zone === 'center' ? g : splitGroup(g, zone);
+    moveTab(from, p, target, index);
+  } else if (file) {
+    const target = zone === 'center' ? g : splitGroup(g, zone);
+    openFile(file, { group: target, index });
+  }
+}
+document.addEventListener('dragend', clearAllDropMarks);
+document.addEventListener('drop', clearAllDropMarks);
+
+// ---------- saving ----------
 // `explicit` = the user asked to save (Ctrl+S / File → Save). Only then is
 // "Format on save" applied — autosave never reformats under your cursor.
 async function saveActiveFile(filePath, { explicit = false } = {}) {
-  if (!activeWorkspace || activeTabPath !== filePath) return;
+  const doc = filePath && documents.get(pathKey(filePath))?.doc;
+  if (!doc) return;
   if (explicit && getSettings().formatOnSave) {
-    try { await activeWorkspace.editor.getAction('editor.action.formatDocument')?.run(); } catch { /* formatter errors are toasted by the formatter */ }
-    if (!activeWorkspace || activeTabPath !== filePath) return;
+    const g = focusedGroup?.view?.doc === doc ? focusedGroup : [...groups.values()].find((x) => x.view?.doc === doc);
+    try { await g?.view?.editor.getAction('editor.action.formatDocument')?.run(); } catch { /* formatter errors are toasted by the formatter */ }
+    if (documents.get(pathKey(filePath))?.doc !== doc) return;
   }
-  const text = activeWorkspace.getValue();
-  const ws = activeWorkspace;
-  window.electronAPI.writeFile(filePath, text).then(() => {
-    ws.diskText = text;
+  writeDoc(doc).then(() => {
     scm.refreshSoon();
     pluginHost.emit('save', { path: filePath });
-    if (activeWorkspace && activeTabPath === filePath) languageSupport.onFileSaved(activeWorkspace.editor.getModel());
+    languageSupport.onFileSaved(doc.model);
   });
 }
 
 async function saveFileAs(filePath) {
-  const content = filePath === activeTabPath && activeWorkspace ? activeWorkspace.getValue() : await window.electronAPI.readFile(filePath);
+  const doc = documents.get(pathKey(filePath))?.doc;
+  const content = doc ? doc.getValue() : await window.electronAPI.readFile(filePath);
   const target = await window.electronAPI.showSaveDialog(filePath);
   if (!target) return;
   await window.electronAPI.writeFile(target, content);
   if (target.startsWith(rootFolder)) refreshTree();
+}
+
+// A file (or folder) was renamed: open tabs follow it to the new path.
+async function renameOpenPaths(oldPath, newPath) {
+  const oldKey = pathKey(oldPath).replace(/\/+$/, '');
+  const mapPath = (p) => {
+    const k = pathKey(p);
+    if (k === oldKey) return newPath;
+    if (k.startsWith(oldKey + '/')) return newPath + p.slice(oldPath.replace(/[\\/]+$/, '').length);
+    return null;
+  };
+  for (const g of groups.values()) {
+    let reopen = null;
+    g.tabs = g.tabs.map((p) => {
+      const np = mapPath(p);
+      if (np && g.activePath && samePath(g.activePath, p)) reopen = np;
+      return np || p;
+    });
+    if (reopen) {
+      const old = g.activePath;
+      g.view?.destroy();
+      g.view = null;
+      g.activePath = null;
+      releaseDoc(old, { save: false }); // its edits were flushed before the rename
+      activateTab(reopen, g);
+    }
+    renderGroupTabs(g);
+  }
 }
 
 async function duplicateNode(node) {
@@ -930,7 +1321,7 @@ async function deleteNode(node) {
     // close the file (or every open file inside the folder) first, without
     // the usual flush-to-disk, so the deleted file isn't written back
     const inside = (p) => samePath(p, node.path) || p.toLowerCase().startsWith(node.path.toLowerCase().replace(/[\\/]+$/, '') + (node.path.includes('\\') ? '\\' : '/'));
-    for (const t of openTabs.filter((t) => inside(t.path))) closeTab(t.path, { save: false });
+    for (const p of allOpenPaths().filter(inside)) closeEverywhere(p, { save: false });
     await window.electronAPI.deleteEntry(node.path);
     toast(`Deleted ${node.name}`);
     refreshTree();
@@ -1021,13 +1412,13 @@ renameForm.addEventListener('submit', async (e) => {
   const newName = renameInput.value.trim();
   if (!newName || newName === renamingNode.name) { renameModal.hidden = true; return; }
 
-  const newPath = joinPath(parentDir(renamingNode.path), newName);
+  const sep = renamingNode.path.includes('\\') ? '\\' : '/';
+  const newPath = parentDir(renamingNode.path) + sep + newName;
   try {
+    // flush unsaved edits of anything open under the old path first
+    await Promise.all([...documents.values()].filter((r) => r.doc && pathKey(r.doc.filePath).startsWith(pathKey(renamingNode.path))).map((r) => writeDoc(r.doc)));
     await window.electronAPI.renameEntry(renamingNode.path, newPath);
-    if (activeTabPath === renamingNode.path) activeTabPath = newPath;
-    const tab = openTabs.find((t) => t.path === renamingNode.path);
-    if (tab) tab.path = newPath;
-    renderTabs();
+    await renameOpenPaths(renamingNode.path, newPath);
     renameModal.hidden = true;
     refreshTree();
   } catch (err) {
@@ -1083,7 +1474,7 @@ function nodeMenu(node) {
     { label: 'Copy Relative Path', onClick: () => copyText(relPath(node.path), 'Relative path') },
     '-',
     ...(isDir ? [] : [
-      { label: 'Save', kbd: 'Ctrl+S', disabled: node.path !== activeTabPath, onClick: () => saveActiveFile(node.path, { explicit: true }) },
+      { label: 'Save', kbd: 'Ctrl+S', disabled: !documents.get(pathKey(node.path))?.doc, onClick: () => saveActiveFile(node.path, { explicit: true }) },
       { label: 'Save As…', onClick: () => saveFileAs(node.path) },
       '-'
     ]),
@@ -1107,14 +1498,18 @@ function explorerBackgroundMenu() {
   ];
 }
 
-function tabMenu(filePath) {
-  const idx = openTabs.findIndex((t) => t.path === filePath);
-  const closeMany = (list) => list.forEach((t) => closeTab(t.path));
+function tabMenu(filePath, g = focusedGroup) {
+  const tabs = g.tabs;
+  const idx = tabs.findIndex((p) => samePath(p, filePath));
+  const closeMany = (list) => list.forEach((p) => closeTab(p, { group: g }));
   return [
-    { label: 'Close', kbd: 'Ctrl+W', onClick: () => closeTab(filePath) },
-    { label: 'Close Others', disabled: openTabs.length < 2, onClick: () => closeMany(openTabs.filter((t) => t.path !== filePath)) },
-    { label: 'Close to the Right', disabled: idx === openTabs.length - 1, onClick: () => closeMany(openTabs.slice(idx + 1)) },
-    { label: 'Close All', onClick: () => closeMany([...openTabs]) },
+    { label: 'Close', kbd: 'Ctrl+W', onClick: () => closeTab(filePath, { group: g }) },
+    { label: 'Close Others', disabled: tabs.length < 2, onClick: () => closeMany(tabs.filter((p) => !samePath(p, filePath))) },
+    { label: 'Close to the Right', disabled: idx === tabs.length - 1, onClick: () => closeMany(tabs.slice(idx + 1)) },
+    { label: 'Close All', onClick: () => closeMany([...tabs]) },
+    '-',
+    { label: 'Split Right', kbd: 'Ctrl+\\', onClick: () => { const ng = splitGroup(g, 'right'); openFile(filePath, { group: ng }); } },
+    { label: 'Split Down', onClick: () => { const ng = splitGroup(g, 'bottom'); openFile(filePath, { group: ng }); } },
     '-',
     { label: 'Copy Path', onClick: () => copyText(filePath, 'Path') },
     { label: 'Copy Relative Path', onClick: () => copyText(relPath(filePath), 'Relative path') },
@@ -1133,7 +1528,12 @@ document.addEventListener('contextmenu', (e) => {
     return showMenu(e.clientX, e.clientY, nodeMenu({ path: node.dataset.path, type: node.dataset.type, name: node.dataset.name }));
   }
   const tab = e.target.closest('.tab[data-path]');
-  if (tab) { e.preventDefault(); return showMenu(e.clientX, e.clientY, tabMenu(tab.dataset.path)); }
+  if (tab) {
+    e.preventDefault();
+    const g = groups.get(Number(tab.closest('.egroup')?.dataset.group)) || focusedGroup;
+    focusGroup(g);
+    return showMenu(e.clientX, e.clientY, tabMenu(tab.dataset.path, g));
+  }
   if (rootFolder && e.target.closest('#panel-project-list')) { e.preventDefault(); return showMenu(e.clientX, e.clientY, explorerBackgroundMenu()); }
 });
 
@@ -1337,7 +1737,7 @@ document.querySelectorAll('[data-accent]').forEach((b) => {
 })();
 
 function applyLiveEditorSettings() {
-  if (activeWorkspace) activeWorkspace.applyEditorSettings(monacoOptionsFromSettings());
+  for (const g of groups.values()) g.view?.applyEditorSettings(monacoOptionsFromSettings());
 }
 
 const settingsPanel = document.getElementById('settingsPanel');
@@ -1517,7 +1917,7 @@ function toggleTerminal() {
 let paletteCommands; // filled below; plugins add their commands to it
 const palette = initCommandPalette({
   getProjects: () => allProjects,
-  getOpenFiles: () => (project ? openTabs.map((t) => ({ name: t.path.split(/[\\/]/).pop(), path: t.path })) : []),
+  getOpenFiles: () => (project ? allOpenPaths().map((p) => ({ name: p.split(/[\\/]/).pop(), path: p })) : []),
   listProjectFiles: async () => (rootFolder ? { root: rootFolder, ...(await window.electronAPI.listFiles(rootFolder)) } : null),
   onOpenProject: (p) => openProjectView(p),
   onOpenFile: (path) => openFile(path),
@@ -1569,15 +1969,16 @@ document.getElementById('panel-project-list').addEventListener('keydown', (e) =>
 // git checkout…) show up without a manual refresh. Content-only changes
 // ('change' events, e.g. our own autosave) don't rebuild the tree.
 let externalChangeTimer = null;
-let diskCheckTimer = null;
 let tabsCheckTimer = null;
+const diskTimers = new Map();
 window.electronAPI.onFileExternalChange(({ path: watched, eventType, filename }) => {
   if (!rootFolder || !samePath(watched, rootFolder)) return;
   scm.refreshSoon();
   const changed = filename ? joinPath(rootFolder, String(filename).replace(/\\/g, '/')) : null;
-  if (changed && activeTabPath && samePath(changed, activeTabPath)) {
-    clearTimeout(diskCheckTimer);
-    diskCheckTimer = setTimeout(syncActiveFromDisk, 200);
+  if (changed && documents.has(pathKey(changed))) {
+    const key = pathKey(changed);
+    clearTimeout(diskTimers.get(key));
+    diskTimers.set(key, setTimeout(() => syncDocFromDisk(changed), 200));
   }
   if (eventType !== 'rename') return;
   clearTimeout(externalChangeTimer);
@@ -1586,45 +1987,45 @@ window.electronAPI.onFileExternalChange(({ path: watched, eventType, filename })
   tabsCheckTimer = setTimeout(closeTabsWhoseFileIsGone, 350);
 });
 
-// The open file changed on disk (another app, the terminal, git, a plugin…).
+// An open file changed on disk (another app, the terminal, git, a plugin…).
 // Unchanged editor → reload in place (cursor kept). Unsaved edits → ask.
-let askingReload = false;
-async function syncActiveFromDisk() {
-  const ws = activeWorkspace;
-  const filePath = activeTabPath;
-  if (!ws || !filePath || project?.cloudEnabled) return; // cloud files sync through Yjs
+const askingReload = new Set();
+async function syncDocFromDisk(filePath) {
+  const key = pathKey(filePath);
+  const doc = documents.get(key)?.doc;
+  if (!doc || doc.collaborative) return; // cloud files sync through Yjs
   let disk;
-  try { disk = await window.electronAPI.readFile(filePath); } catch { return closeTabsWhoseFileIsGone(); }
-  if (ws !== activeWorkspace || disk === ws.diskText) return; // our own save, or nothing new
-  const model = ws.editor.getModel();
+  try { disk = await window.electronAPI.readFile(doc.filePath); } catch { return closeTabsWhoseFileIsGone(); }
+  if (documents.get(key)?.doc !== doc || disk === doc.diskText) return; // our own save, or nothing new
+  const model = doc.model;
   const apply = () => {
-    const selections = ws.editor.getSelections();
-    ws.editor.pushUndoStop();
-    model.pushEditOperations(selections, [{ range: model.getFullModelRange(), text: disk }], () => selections);
-    ws.editor.pushUndoStop();
-    ws.diskText = disk;
+    const view = [...groups.values()].find((g) => g.view?.doc === doc)?.view;
+    const selections = view ? view.editor.getSelections() : [];
+    model.pushEditOperations(selections || [], [{ range: model.getFullModelRange(), text: disk }], () => selections);
+    doc.diskText = disk;
   };
-  if (model.getValue() === ws.diskText) { apply(); return; }
-  if (askingReload) return;
-  askingReload = true;
-  const name = filePath.split(/[\\/]/).pop();
+  if (model.getValue() === doc.diskText) { apply(); return; }
+  if (askingReload.has(key)) return;
+  askingReload.add(key);
+  const name = doc.filePath.split(/[\\/]/).pop();
   const ok = await confirmDialog({
     title: `${name} changed on disk`,
-    message: 'Another program changed this file while you have edits that aren\u2019t saved yet. Reload it from disk (your unsaved edits are dropped), or keep your version (saving will overwrite the disk version)?',
+    message: 'Another program changed this file while you have edits that aren’t saved yet. Reload it from disk (your unsaved edits are dropped), or keep your version (saving will overwrite the disk version)?',
     confirmLabel: 'Reload from disk'
   });
-  askingReload = false;
-  if (ok && ws === activeWorkspace) apply();
-  else if (ws === activeWorkspace) ws.diskText = disk; // keep mine: don't ask again for this change
+  askingReload.delete(key);
+  if (documents.get(key)?.doc !== doc) return;
+  if (ok) apply();
+  else doc.diskText = disk; // keep mine: don't ask again for this change
 }
 
 // Open files that were deleted or moved elsewhere close (without saving).
 async function closeTabsWhoseFileIsGone() {
   const gone = [];
-  for (const t of [...openTabs]) {
-    try { await window.electronAPI.readFile(t.path); } catch { gone.push(t.path); }
+  for (const p of allOpenPaths()) {
+    try { await window.electronAPI.readFile(p); } catch { gone.push(p); }
   }
-  for (const p of gone) closeTab(p, { save: false });
+  for (const p of gone) closeEverywhere(p, { save: false });
   if (gone.length) toast(gone.length === 1 ? `${gone[0].split(/[\\/]/).pop()} was deleted or moved` : `${gone.length} open files were deleted or moved`, 'error');
 }
 
@@ -1775,6 +2176,10 @@ initMenubar(document.getElementById('menubar'), [
     { label: 'Toggle Panel', kbd: 'Ctrl+J', run: () => (bottomPanel.isOpen() ? bottomPanel.close() : (go('editor'), bottomPanel.open())) },
     { label: 'Toggle Sidebar', kbd: 'Ctrl+B', run: () => toggleSidebar() },
     '-',
+    { label: 'Split Editor Right', kbd: 'Ctrl+\\', run: () => { go('editor'); splitEditor(focusedGroup, 'right'); }, enabled: hasEditor },
+    { label: 'Split Editor Down', run: () => { go('editor'); splitEditor(focusedGroup, 'bottom'); }, enabled: hasEditor },
+    { label: 'Close Editor Group', run: () => closeGroup(focusedGroup), enabled: () => groups.size > 1 },
+    '-',
     { label: 'Zoom In', kbd: 'Ctrl+=', run: () => window.electronAPI.zoom('in') },
     { label: 'Zoom Out', kbd: 'Ctrl+-', run: () => window.electronAPI.zoom('out') },
     { label: 'Reset Zoom', kbd: 'Ctrl+0', run: () => window.electronAPI.zoom('reset') },
@@ -1830,12 +2235,7 @@ const extensions = initExtensions({
 
 const formatting = initFormatting({ toast, confirmDialog, getRoot: () => rootFolder });
 
-const breadcrumbs = initBreadcrumbs({
-  getRoot: () => rootFolder,
-  getProjectName: () => project?.name,
-  lspSymbols: (model) => languageSupport.symbolsFor(model),
-  onReveal: (p) => revealInTree(p)
-});
+
 
 const languageSupport = initLanguageSupport({
   onCatalogChange: (catalog) => formatting.setCatalog(catalog),
@@ -1904,6 +2304,11 @@ function appShortcut(e) {
   if (!e.shiftKey && k === 'b') return toggleSidebar;
   if (!e.shiftKey && k === 'j') return () => (bottomPanel.isOpen() ? bottomPanel.close() : (go('editor'), bottomPanel.open()));
   if (!e.shiftKey && k === 'w' && activeTabPath) return () => closeTab(activeTabPath);
+  if (!e.shiftKey && e.key === '\\') return () => { go('editor'); splitEditor(focusedGroup, 'right'); };
+  if (!e.shiftKey && /^[1-9]$/.test(e.key) && currentView === 'editor') {
+    const target = orderedGroups()[Number(e.key) - 1];
+    if (target) return () => { focusGroup(target); target.view?.editor.focus(); };
+  }
   if (!e.shiftKey && k === 's') return () => { if (activeTabPath) saveActiveFile(activeTabPath, { explicit: true }); };
   if (e.key === ',') return openSettings;
   return null;
@@ -1926,6 +2331,7 @@ document.addEventListener('keydown', (e) => {
 /* ============================================================
    Boot
    ============================================================ */
+resetLayout(); // the first (only) editor group
 enhanceSelects(); // after settings have set each <select>'s initial value
 go('dashboard');
 refreshProjects();

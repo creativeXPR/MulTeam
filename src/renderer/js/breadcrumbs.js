@@ -51,8 +51,7 @@ function pathAt(symbols, pos) {
   }
 }
 
-export function initBreadcrumbs({ getRoot, getProjectName, lspSymbols, onReveal }) {
-  const el = document.getElementById('breadcrumbs');
+export function initBreadcrumbs({ el, getRoot, getProjectName, lspSymbols, onReveal }) {
   let editor = null;
   let filePath = null;
   let symbols = null;

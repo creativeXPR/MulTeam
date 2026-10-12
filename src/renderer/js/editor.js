@@ -138,39 +138,90 @@ export function watchMarkers(callback) {
 export const MarkerSeverity = monaco.MarkerSeverity;
 
 
-export class CollaborativeWorkspace {
-  constructor(containerElement, { docId, filePath, currentUser, collaborative = true }) {
-    this.container = containerElement;
-    this.docId = docId;
-    this.filePath = filePath;
-    this.currentUser = currentUser;
-    this.collaborative = collaborative;
-
-    this.doc = collaborative ? new Y.Doc() : null;
+// ------------------------------------------------------------------
+// One open FILE (shared by every editor group showing it): the text model,
+// live-collaboration plumbing (Yjs + Firebase) and the copy known on disk.
+// ------------------------------------------------------------------
+export class FileDocument {
+  constructor(filePath, { docId, currentUser, collaborative = false }) {
+    Object.assign(this, { filePath, docId, currentUser, collaborative });
+    this.ydoc = collaborative ? new Y.Doc() : null;
     this.provider = null;
     this.binding = null;
-    this.editor = null;
     this.model = null;
+    this.diskText = '';
+    this.editors = new Set();
   }
 
-  initialize(initialContent = '', theme = 'light') {
+  init(initialContent = '') {
     defineMulteamThemes();
     configureLanguages();
-
     // The model's URI is the real file path, so the TS service knows .tsx
     // from .ts (JSX), and diagnostics/markers can be traced back to a file.
     const uri = monaco.Uri.file(this.filePath);
     monaco.editor.getModel(uri)?.dispose();
-    this.model = monaco.editor.createModel(
-      // Purely local (non-cloud) projects never touch Yjs/Firebase at all —
-      // just a plain Monaco editor seeded straight from disk content.
-      this.collaborative ? '' : initialContent,
-      undefined, // let Monaco pick the language from the extension (~80 built in: php, java, cs, cpp, go, rust…)
-      uri
-    );
+    // Purely local (non-cloud) projects never touch Yjs/Firebase at all.
+    this.model = monaco.editor.createModel(this.collaborative ? '' : initialContent, undefined, uri);
+    this.diskText = initialContent;
+    if (!this.collaborative) return this;
 
-    this.editor = monaco.editor.create(this.container, {
-      model: this.model,
+    const yText = this.ydoc.getText('monaco');
+    // Seed the shared type from disk only if no one has synced content yet —
+    // otherwise every new peer opening the file would stomp the live doc.
+    if (yText.length === 0 && initialContent) yText.insert(0, initialContent);
+    this.provider = new FirebaseProvider(this.docId, this.ydoc);
+    // The editors set is live: views added later get remote cursors too.
+    this.binding = new MonacoBinding(yText, this.model, this.editors, this.provider.awareness);
+    this.provider.awareness.on('change', this.binding._rerenderDecorations);
+    return this;
+  }
+
+  // Called by each EditorView showing this file.
+  attach(editor) {
+    this.editors.add(editor);
+    if (!this.binding) return;
+    // broadcast this view's cursor/selection to collaborators
+    const ytext = this.binding.ytext;
+    editor.onDidChangeCursorSelection(() => {
+      if (editor.getModel() !== this.model || !this.editors.has(editor)) return;
+      const sel = editor.getSelection();
+      if (!sel) return;
+      let anchor = this.model.getOffsetAt(sel.getStartPosition());
+      let head = this.model.getOffsetAt(sel.getEndPosition());
+      if (sel.getDirection() === monaco.SelectionDirection.RTL) [anchor, head] = [head, anchor];
+      this.provider.awareness.setLocalStateField('selection', {
+        anchor: Y.createRelativePositionFromTypeIndex(ytext, anchor),
+        head: Y.createRelativePositionFromTypeIndex(ytext, head)
+      });
+    });
+    this.binding._rerenderDecorations();
+  }
+
+  detach(editor) { this.editors.delete(editor); }
+
+  getValue() { return this.model.getValue(); }
+  getAwareness() { return this.provider ? this.provider.awareness : null; }
+
+  destroy() {
+    if (this.provider && this.binding) this.provider.awareness.off('change', this.binding._rerenderDecorations);
+    if (this.binding) this.binding.destroy();
+    if (this.provider) this.provider.destroy();
+    if (this.model && !this.model.isDisposed()) this.model.dispose();
+    if (this.ydoc) this.ydoc.destroy();
+    this.editors.clear();
+  }
+}
+
+// ------------------------------------------------------------------
+// One Monaco editor showing a FileDocument inside an editor group. Keeps the
+// method names the rest of the app already uses (activeWorkspace.*).
+// ------------------------------------------------------------------
+export class EditorView {
+  constructor(container, doc, theme = 'light') {
+    this.doc = doc;
+    this.filePath = doc.filePath;
+    this.editor = monaco.editor.create(container, {
+      model: doc.model,
       theme: monacoThemeFor(theme),
       automaticLayout: true,
       padding: { top: 16, bottom: 16 },
@@ -181,33 +232,15 @@ export class CollaborativeWorkspace {
       renderLineHighlight: 'all',
       ...monacoOptionsFromSettings()
     });
-
-    if (!this.collaborative) return this;
-
-    const yText = this.doc.getText('monaco');
-
-    // Seed the shared type from disk only if no one has synced content yet —
-    // otherwise every new peer opening the file would stomp the live doc.
-    if (yText.length === 0 && initialContent) {
-      yText.insert(0, initialContent);
-    }
-
-    this.provider = new FirebaseProvider(this.docId, this.doc);
-
-    this.binding = new MonacoBinding(
-      yText,
-      this.editor.getModel(),
-      new Set([this.editor]),
-      this.provider.awareness
-    );
-
-    return this;
+    doc.attach(this.editor);
   }
+
+  get diskText() { return this.doc.diskText; }
+  set diskText(v) { this.doc.diskText = v; }
 
   // Moves the cursor to a position (optionally selecting `length` chars,
   // e.g. a search hit) and scrolls it into view.
   revealPosition(lineNumber, column, length = 0) {
-    if (!this.editor) return;
     this.editor.revealLineInCenterIfOutsideViewport(lineNumber);
     this.editor.setSelection({ startLineNumber: lineNumber, startColumn: column, endLineNumber: lineNumber, endColumn: column + length });
     this.editor.focus();
@@ -215,52 +248,37 @@ export class CollaborativeWorkspace {
 
   // full (possibly multi-line) selection — used by the plugin API
   selectionText() {
-    const sel = this.editor?.getSelection();
+    const sel = this.editor.getSelection();
     return sel ? this.editor.getModel().getValueInRange(sel) : '';
   }
 
   replaceSelection(text) {
-    if (!this.editor) return;
     this.editor.pushUndoStop();
     this.editor.executeEdits('plugin', [{ range: this.editor.getSelection(), text, forceMoveMarkers: true }]);
     this.editor.pushUndoStop();
   }
 
   insertText(text) {
-    if (!this.editor) return;
     const p = this.editor.getPosition();
     this.editor.pushUndoStop();
     this.editor.executeEdits('plugin', [{ range: new monaco.Range(p.lineNumber, p.column, p.lineNumber, p.column), text, forceMoveMarkers: true }]);
     this.editor.pushUndoStop();
   }
 
-  languageId() {
-    return this.editor ? this.editor.getModel().getLanguageId() : null;
-  }
+  languageId() { return this.editor.getModel().getLanguageId(); }
 
   selectedText() {
-    if (!this.editor) return '';
     const sel = this.editor.getSelection();
     return sel && !sel.isEmpty() && sel.startLineNumber === sel.endLineNumber ? this.editor.getModel().getValueInRange(sel) : '';
   }
 
-  applyEditorSettings(monacoOptions) {
-    if (this.editor) this.editor.updateOptions(monacoOptions);
-  }
+  applyEditorSettings(monacoOptions) { this.editor.updateOptions(monacoOptions); }
+  getAwareness() { return this.doc.getAwareness(); }
+  getValue() { return this.doc.getValue(); }
 
-  getAwareness() {
-    return this.provider ? this.provider.awareness : null;
-  }
-
-  getValue() {
-    return this.editor.getModel().getValue();
-  }
-
+  // the view only — the document lives on while another group shows it
   destroy() {
-    if (this.binding) this.binding.destroy();
-    if (this.provider) this.provider.destroy();
-    if (this.editor) this.editor.dispose();
-    if (this.model) this.model.dispose();
-    if (this.doc) this.doc.destroy();
+    this.doc.detach(this.editor);
+    this.editor.dispose();
   }
 }

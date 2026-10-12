@@ -362,9 +362,8 @@ multeam.on('save', ({ path }) =&gt; {});</code></pre>
 
           <!-- ===== EDITOR VIEW ===== -->
           <section class="view editor-view" id="view-editor" hidden>
-            <div id="tab-bar" class="tab-bar"></div>
-            <nav id="breadcrumbs" class="crumbs" aria-label="Breadcrumbs"></nav>
-            <div id="monaco-container" data-empty="Open a project from the sidebar"></div>
+            <!-- editor groups (splits) are built by shell.js -->
+            <div id="editorGrid" class="editor-grid"></div>
 
             <!-- bottom panel (Ctrl+J) -->
             <div class="bpanel" id="bottomPanel" hidden>
@@ -696,6 +695,7 @@ multeam.on('save', ({ path }) =&gt; {});</code></pre>
           <li><b>New project</b> — pick a name and a folder. Nothing touches the cloud unless you turn on cloud sync.</li>
           <li><b>Cloud sync</b> — turn it on (per-project) to collaborate live with others; you'll be asked to sign in the first time.</li>
           <li><b>Ctrl+K</b> — jump to any project, open file, or app command.</li>
+          <li><b>Split editors</b> — drag a tab to reorder it, or onto the left/right/top/bottom of an editor to open it there. Ctrl+\ splits right; Ctrl+1–9 focuses a group. Drag files from the Explorer too.</li>
           <li><b>Ctrl+P</b> — open any file in the project by typing part of its name (type <b>&gt;</b> for commands).</li>
           <li><b>Ctrl+Shift+F</b> — search text across every file in the project; click a result to jump to it.</li>
           <li><b>Language support</b> — Extensions view → Language support → Install (JavaScript/TypeScript, Python, C/C++, PHP, Java, C#). Downloads the language server once (Java uses your Java 21+ if you have it; C# needs the .NET SDK); then IntelliSense, go to definition (F12) and real errors work. The footer shows its status.</li>
