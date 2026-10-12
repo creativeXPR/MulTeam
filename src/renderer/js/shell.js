@@ -54,7 +54,10 @@ document.getElementById('searchFieldIcon').innerHTML = searchIconSvg();
    State
    ============================================================ */
 let currentUser = null;
-let allProjects = [];
+let allProjects = [];   // the CURRENT workspace's projects (what the Explorer/Dashboard show)
+let everyProject = [];  // all registered projects, across workspaces
+let workspaces = [];
+let currentWsId = null;
 let wsFilter = 'all';
 
 let project = null; // currently open project, or null
@@ -261,8 +264,18 @@ document.querySelectorAll('[data-tree]').forEach((btn) => {
 /* ============================================================
    Local project registry — list, create, edit, delete, duplicate
    ============================================================ */
+const wsOf = (p) => p.workspaceId || workspaces[0]?.id;
+const currentWs = () => workspaces.find((w) => w.id === currentWsId) || workspaces[0];
+
 async function refreshProjects() {
-  allProjects = await window.electronAPI.listProjects();
+  const [list, ws] = await Promise.all([window.electronAPI.listProjects(), window.electronAPI.workspaces.list()]);
+  workspaces = ws.workspaces;
+  currentWsId = ws.currentId;
+  everyProject = list;
+  allProjects = list.filter((p) => wsOf(p) === currentWsId);
+  // the open project left this workspace (switched away, or moved elsewhere)
+  if (project && !allProjects.some((p) => p.id === project.id)) closeProjectView();
+  paintWorkspaceName();
   renderProjectsGrid();
   renderPanelProjects();
   renderDashboardCards();
@@ -377,6 +390,7 @@ function renderPanelProjects() {
     const row = document.createElement('button');
     row.type = 'button';
     row.className = `subitem directory ${project && project.id === p.id ? 'is-sel expanded' : ''}`;
+    row.dataset.projectRow = p.id;
 
     const chevron = document.createElement('span');
     chevron.className = 'node-chevron';
@@ -402,6 +416,112 @@ function renderPanelProjects() {
       loadFileTree(rootFolder, treeContainer);
     }
   }
+}
+
+/* ============================================================
+   Workspaces — groups of projects; the Explorer + Dashboard show the
+   current one. Stored locally by the main process (projects.js).
+   ============================================================ */
+function paintWorkspaceName() {
+  const name = currentWs()?.name || 'Workspace';
+  document.getElementById('wsExplorerName').textContent = name;
+  document.getElementById('wsDashName').textContent = name;
+  document.getElementById('wsStatLabel').textContent = name;
+  document.getElementById('wsExplorerBtn').title = `Workspace: ${name} (switch, create or manage)`;
+}
+
+async function switchWorkspace(id) {
+  if (id === currentWsId) return;
+  try { await window.electronAPI.workspaces.setCurrent(id); } catch (err) { toast(cleanError(err), 'error'); }
+  await refreshProjects();
+  toast(`Switched to ${currentWs().name}`);
+}
+
+function pickWorkspace() {
+  closeAllOverlays();
+  palette.pick({
+    title: 'Switch workspace',
+    items: workspaces.map((w) => ({ label: w.name, detail: `${everyProject.filter((p) => wsOf(p) === w.id).length} projects`, value: w.id })),
+    current: currentWsId,
+    onPick: (it) => switchWorkspace(it.value)
+  });
+}
+
+async function newWorkspace() {
+  const name = await promptDialog({ title: 'New workspace', label: 'Name', placeholder: 'e.g. Client work', confirmLabel: 'Create' });
+  if (!name?.trim()) return;
+  try { await window.electronAPI.workspaces.create(name); } catch (err) { toast(cleanError(err), 'error'); return; }
+  await refreshProjects();
+  toast(`Created ${currentWs().name}. New projects go here.`);
+}
+
+async function renameWorkspace(ws = currentWs()) {
+  const name = await promptDialog({ title: 'Rename workspace', label: 'Name', value: ws.name, confirmLabel: 'Rename' });
+  if (!name?.trim() || name.trim() === ws.name) return;
+  try { await window.electronAPI.workspaces.rename(ws.id, name); } catch (err) { toast(cleanError(err), 'error'); return; }
+  await refreshProjects();
+}
+
+async function deleteWorkspace(ws = currentWs()) {
+  if (workspaces.length < 2) return;
+  const target = workspaces.find((w) => w.id !== ws.id);
+  const count = everyProject.filter((p) => wsOf(p) === ws.id).length;
+  const ok = await confirmDialog({
+    title: `Delete the "${ws.name}" workspace?`,
+    message: count
+      ? `Its ${count} project${count === 1 ? '' : 's'} will move to "${target.name}". No projects, files or folders are deleted.`
+      : 'It has no projects. No files or folders are touched.',
+    confirmLabel: 'Delete workspace',
+    danger: true
+  });
+  if (!ok) return;
+  try { await window.electronAPI.workspaces.remove(ws.id, target.id); } catch (err) { toast(cleanError(err), 'error'); return; }
+  await refreshProjects();
+  toast(`Deleted ${ws.name}`);
+}
+
+function workspaceMenuItems() {
+  return [
+    ...workspaces.map((w) => ({
+      label: w.name,
+      kbd: String(everyProject.filter((p) => wsOf(p) === w.id).length),
+      checked: w.id === currentWsId,
+      onClick: () => switchWorkspace(w.id)
+    })),
+    '-',
+    { label: 'New Workspace…', onClick: newWorkspace },
+    { label: 'Rename Workspace…', onClick: () => renameWorkspace() },
+    { label: 'Delete Workspace…', danger: true, disabled: workspaces.length < 2, onClick: () => deleteWorkspace() }
+  ];
+}
+
+function openWorkspaceMenu(anchor) {
+  const r = anchor.getBoundingClientRect();
+  showMenu(r.left, r.bottom + 4, workspaceMenuItems());
+}
+for (const id of ['wsExplorerBtn', 'wsDashBtn']) {
+  document.getElementById(id).addEventListener('click', (e) => { e.stopPropagation(); openWorkspaceMenu(e.currentTarget); });
+}
+
+async function moveProjectToWorkspace(p, wsId) {
+  try { await window.electronAPI.updateProject(p.id, { workspaceId: wsId }); } catch (err) { toast(cleanError(err), 'error'); return; }
+  await refreshProjects();
+  toast(`Moved ${p.name} to ${workspaces.find((w) => w.id === wsId)?.name}`);
+}
+
+// right-click on a project (Explorer row or Dashboard card)
+function projectMenu(p) {
+  const others = workspaces.filter((w) => w.id !== wsOf(p));
+  return [
+    { label: 'Open', onClick: () => openProjectView(p) },
+    { label: 'Edit…', onClick: () => openProjectModal('edit', p) },
+    '-',
+    ...(others.length
+      ? others.map((w) => ({ label: `Move to ${w.name}`, onClick: () => moveProjectToWorkspace(p, w.id) }))
+      : [{ label: 'Move to… (create another workspace first)', disabled: true, onClick: () => {} }]),
+    '-',
+    { label: 'Delete…', danger: true, onClick: () => openDeleteModal(p) }
+  ];
 }
 
 /* ============================================================
@@ -467,7 +587,7 @@ projectForm.addEventListener('submit', async (e) => {
 
   try {
     if (modalMode === 'create') {
-      const created = await window.electronAPI.createProject({ name, folderPath: chosenFolder, cloudEnabled });
+      const created = await window.electronAPI.createProject({ name, folderPath: chosenFolder, cloudEnabled, workspaceId: currentWsId });
       if (cloudEnabled) await enableCloud(created.id, name);
       projectModal.hidden = true;
       await refreshProjects();
@@ -1604,10 +1724,16 @@ document.addEventListener('contextmenu', (e) => {
     focusGroup(g);
     return showMenu(e.clientX, e.clientY, tabMenu(tab.dataset.path, g));
   }
+  const projRow = e.target.closest('[data-project-row], #projects [data-project]');
+  if (projRow) {
+    const p = allProjects.find((x) => x.id === (projRow.dataset.projectRow || projRow.dataset.project));
+    if (p) { e.preventDefault(); return showMenu(e.clientX, e.clientY, projectMenu(p)); }
+  }
+  if (e.target.closest('.sidelist__headrow') && !e.target.closest('#explorerActs')) { e.preventDefault(); return showMenu(e.clientX, e.clientY, workspaceMenuItems()); }
   if (rootFolder && e.target.closest('#panel-project-list')) { e.preventDefault(); return showMenu(e.clientX, e.clientY, explorerBackgroundMenu()); }
 });
 
-// items: { label, kbd?, onClick, danger?, disabled? } | '-'
+// items: { label, kbd?, onClick, danger?, disabled?, checked? } | '-'
 function showMenu(x, y, items) {
   contextMenuEl.innerHTML = '';
   for (const item of items) {
@@ -1622,6 +1748,7 @@ function showMenu(x, y, items) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = item.danger ? 'context-menu-item danger' : 'context-menu-item';
+    if (item.checked !== undefined) btn.classList.add('is-checkable', ...(item.checked ? ['is-checked'] : []));
     btn.disabled = !!item.disabled;
     const label = document.createElement('span');
     label.className = 'context-menu-label';
@@ -1991,6 +2118,8 @@ const palette = initCommandPalette({
   onOpenFile: (path) => openFile(path),
   commands: paletteCommands = [
     { label: 'New project', action: () => openProjectModal('create', null) },
+    { label: 'Workspaces: Switch Workspace…', action: () => setTimeout(pickWorkspace, 0) },
+    { label: 'Workspaces: New Workspace…', action: () => setTimeout(newWorkspace, 0) },
     { label: 'Toggle theme', action: () => applyTheme(getEffectiveTheme() === 'dark' ? 'light' : 'dark', { user: true }) },
     { label: 'Open settings', action: () => openSettings() },
     { label: 'Toggle panel', hint: 'Ctrl+J', action: () => toggleProblems() },
@@ -2177,10 +2306,12 @@ const openPalette = () => { closeAllOverlays(); palette.open('all'); };
 initMenubar(document.getElementById('menubar'), [
   { label: 'File', items: [
     { label: 'New Project…', run: () => openProjectModal('create', null) },
+    { label: 'New Workspace…', run: () => newWorkspace() },
     { label: 'New File', run: () => startInlineCreate('file'), enabled: hasProject },
     { label: 'New Folder', run: () => startInlineCreate('directory'), enabled: hasProject },
     '-',
     { label: 'Open Project…', kbd: 'Ctrl+K', run: openPalette },
+    { label: 'Switch Workspace…', run: () => pickWorkspace(), enabled: () => workspaces.length > 1 },
     '-',
     { label: 'Save', kbd: 'Ctrl+S', run: () => saveActiveFile(activeTabPath, { explicit: true }), enabled: hasEditor },
     { label: 'Save As…', run: () => saveFileAs(activeTabPath), enabled: hasEditor },

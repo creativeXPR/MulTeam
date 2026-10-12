@@ -83,7 +83,7 @@
               <div class="sidelist__headrow">
                 <button class="sidelist__head" data-tree="projects" aria-expanded="true">
                   <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="12" height="12"><path d="m6 9 6 6 6-6" /></svg>
-                  Projects
+                  <span class="ws-name" id="wsExplorerName">Projects</span>
                 </button>
                 <span class="explorer__acts" id="explorerActs" hidden>
                   <button type="button" class="ibtn" data-explorer="new-file" title="New File">
@@ -99,6 +99,9 @@
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3" /><path d="M8.5 12h7" /></svg>
                   </button>
                 </span>
+                <button type="button" class="ibtn ws-switch" id="wsExplorerBtn" title="Switch workspace" aria-haspopup="menu">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 9 4-4 4 4M8 15l4 4 4-4" /></svg>
+                </button>
               </div>
               <div class="subtree" id="tree-projects"><div id="panel-project-list"></div></div>
             </div>
@@ -192,15 +195,22 @@
                 <h2>Dashboard</h2>
                 <p id="dashboardGreeting">Welcome back</p>
               </div>
+              <div class="vhead__acts">
+              <button type="button" class="pillbtn ws-pill" id="wsDashBtn" title="Switch workspace" aria-haspopup="menu">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><rect x="3.5" y="4.5" width="7" height="7" rx="1.6" /><rect x="13.5" y="4.5" width="7" height="7" rx="1.6" /><rect x="3.5" y="13.5" width="7" height="7" rx="1.6" /><rect x="13.5" y="13.5" width="7" height="7" rx="1.6" /></svg>
+                <span id="wsDashName">Workspace</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="12" height="12"><path d="m6 9 6 6 6-6" /></svg>
+              </button>
               <button class="pillbtn is-primary" data-action="newproject">
                 <span class="btn-icon" id="newProjectIconMain"></span>
                 New project
               </button>
+              </div>
             </header>
 
             <div class="stats">
               <div class="stat">
-                <div class="stat__label">Workspace</div>
+                <div class="stat__label" id="wsStatLabel">Workspace</div>
                 <div class="bigstat" id="wsBigstat">0</div>
                 <div class="substat" id="wsSub">—</div>
                 <div class="seg" id="wsTabs">
@@ -697,6 +707,7 @@ multeam.on('save', ({ path }) =&gt; {});</code></pre>
           <li><b>New project</b> — pick a name and a folder. Nothing touches the cloud unless you turn on cloud sync.</li>
           <li><b>Cloud sync</b> — turn it on (per-project) to collaborate live with others; you'll be asked to sign in the first time.</li>
           <li><b>Ctrl+K</b> — jump to any project, open file, or app command.</li>
+          <li><b>Workspaces</b> — group projects into workspaces (the ⇅ button in the Explorer header, or the Dashboard's workspace button). The Explorer and Dashboard show the current workspace; right-click a project to move it.</li>
           <li><b>Run</b> — the ▷ button above the editor (or Ctrl+F5) runs the file in the terminal: JavaScript, TypeScript, Python, PHP, Java, C, C++, C#, Go, Ruby, Rust and more. If the language isn't installed, MulTeam offers to install it.</li>
           <li><b>Split editors</b> — drag a tab to reorder it, or onto the left/right/top/bottom of an editor to open it there. Ctrl+\ splits right; Ctrl+1–9 focuses a group. Drag files from the Explorer too.</li>
           <li><b>Ctrl+P</b> — open any file in the project by typing part of its name (type <b>&gt;</b> for commands).</li>

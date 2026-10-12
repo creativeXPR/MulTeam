@@ -400,6 +400,14 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 13p
 .sidelist__headrow { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .sidelist__headrow .sidelist__head { flex: 1; min-width: 0; }
 .explorer__acts { display: flex; gap: 1px; padding-right: 2px; }
+.sidelist__head .ws-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-switch { width: 22px; height: 22px; flex-shrink: 0; margin-right: 2px; }
+.ws-switch svg { width: 14px; height: 14px; }
+.vhead__acts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.ws-pill { max-width: 240px; }
+.ws-pill span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.context-menu-item.is-checkable .context-menu-label::before { content: ""; display: inline-block; width: 16px; color: var(--violet-500); }
+.context-menu-item.is-checked .context-menu-label::before { content: "\2713"; }
 .explorer__acts .ibtn { width: 22px; height: 22px; }
 .explorer__acts .ibtn svg { width: 15px; height: 15px; }
 .file-tree-node.is-sel { background: var(--fill-2); color: var(--text); }

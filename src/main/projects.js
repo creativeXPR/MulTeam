@@ -43,13 +43,14 @@ async function writeRecord(record) {
   return record;
 }
 
-async function createProject({ name, folderPath, cloudEnabled }) {
+async function createProject({ name, folderPath, cloudEnabled, workspaceId }) {
   const now = Date.now();
   return writeRecord({
     id: crypto.randomUUID(),
     name,
     folderPath,
     cloudEnabled: !!cloudEnabled,
+    workspaceId: workspaceId || (await readWorkspaces()).currentId,
     createdAt: now,
     lastOpenedAt: now
   });
@@ -118,12 +119,92 @@ async function duplicateProject(id) {
     name: `${existing.name} (copy)`,
     folderPath: newFolderPath,
     cloudEnabled: existing.cloudEnabled,
+    workspaceId: existing.workspaceId,
     createdAt: now,
     lastOpenedAt: now
   });
 }
 
+// ---------- workspaces ----------
+// A workspace groups projects; the Explorer and Dashboard show the current
+// one. Stored next to the registry: { workspaces: [{ id, name, createdAt }], currentId }.
+// Projects saved before workspaces existed (no workspaceId) belong to the
+// first workspace ("default").
+const DEFAULT_WS = 'default';
+const workspacesFile = () => path.join(app.getPath('userData'), 'workspaces.json');
+
+async function readWorkspaces() {
+  let data = null;
+  try { data = JSON.parse(await fs.readFile(workspacesFile(), 'utf-8')); } catch { /* first run */ }
+  const workspaces = Array.isArray(data?.workspaces) && data.workspaces.length
+    ? data.workspaces
+    : [{ id: DEFAULT_WS, name: 'My Workspace', createdAt: Date.now() }];
+  const currentId = workspaces.some((w) => w.id === data?.currentId) ? data.currentId : workspaces[0].id;
+  return { workspaces, currentId };
+}
+
+async function writeWorkspaces(data) {
+  await fs.mkdir(path.dirname(workspacesFile()), { recursive: true });
+  await fs.writeFile(workspacesFile(), JSON.stringify(data, null, 2), 'utf-8');
+  return data;
+}
+
+const cleanName = (name) => {
+  const n = String(name || '').trim().slice(0, 60);
+  if (!n) throw new Error('Give the workspace a name.');
+  return n;
+};
+
+async function createWorkspace(name) {
+  const data = await readWorkspaces();
+  const ws = { id: crypto.randomUUID(), name: cleanName(name), createdAt: Date.now() };
+  data.workspaces.push(ws);
+  data.currentId = ws.id;
+  await writeWorkspaces(data);
+  return ws;
+}
+
+async function renameWorkspace(id, name) {
+  const data = await readWorkspaces();
+  const ws = data.workspaces.find((w) => w.id === id);
+  if (!ws) throw new Error('That workspace no longer exists.');
+  ws.name = cleanName(name);
+  return writeWorkspaces(data);
+}
+
+async function setCurrentWorkspace(id) {
+  const data = await readWorkspaces();
+  if (!data.workspaces.some((w) => w.id === id)) throw new Error('That workspace no longer exists.');
+  data.currentId = id;
+  return writeWorkspaces(data);
+}
+
+// Deleting a workspace never deletes projects or folders: its projects move
+// to `moveTo` (another workspace).
+async function deleteWorkspace(id, moveTo) {
+  const data = await readWorkspaces();
+  if (data.workspaces.length < 2) throw new Error('You need at least one workspace.');
+  const target = data.workspaces.find((w) => w.id === moveTo && w.id !== id) || data.workspaces.find((w) => w.id !== id);
+  const firstId = data.workspaces[0].id;
+  for (const p of await listProjects()) {
+    if ((p.workspaceId || firstId) === id) await writeRecord({ ...p, workspaceId: target.id });
+  }
+  // projects without a workspaceId follow the FIRST workspace; pin them before it changes
+  if (id === firstId) {
+    for (const p of await listProjects()) if (!p.workspaceId) await writeRecord({ ...p, workspaceId: target.id });
+  }
+  data.workspaces = data.workspaces.filter((w) => w.id !== id);
+  if (data.currentId === id) data.currentId = target.id;
+  await writeWorkspaces(data);
+  return { ...data, movedTo: target.id };
+}
+
 function setupProjectHandlers(ipcMain, IPC) {
+  ipcMain.handle(IPC.WS_LIST, () => readWorkspaces());
+  ipcMain.handle(IPC.WS_CREATE, (_e, name) => createWorkspace(name));
+  ipcMain.handle(IPC.WS_RENAME, (_e, id, name) => renameWorkspace(String(id), name));
+  ipcMain.handle(IPC.WS_SET_CURRENT, (_e, id) => setCurrentWorkspace(String(id)));
+  ipcMain.handle(IPC.WS_DELETE, (_e, id, moveTo) => deleteWorkspace(String(id), moveTo ? String(moveTo) : null));
   ipcMain.handle(IPC.LIST_PROJECTS, () => listProjects());
   ipcMain.handle(IPC.GET_PROJECT, (_e, id) => getProject(id));
   ipcMain.handle(IPC.CREATE_PROJECT, (_e, params) => createProject(params));

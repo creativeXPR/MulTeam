@@ -38,6 +38,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updateProject: (id, patch) => ipcRenderer.invoke(IPC.UPDATE_PROJECT, id, patch),
   deleteProjectLocal: (id, options) => ipcRenderer.invoke(IPC.DELETE_PROJECT_LOCAL, id, options),
   duplicateProject: (id) => ipcRenderer.invoke(IPC.DUPLICATE_PROJECT, id),
+  workspaces: {
+    list: () => ipcRenderer.invoke(IPC.WS_LIST),
+    create: (name) => ipcRenderer.invoke(IPC.WS_CREATE, name),
+    rename: (id, name) => ipcRenderer.invoke(IPC.WS_RENAME, id, name),
+    setCurrent: (id) => ipcRenderer.invoke(IPC.WS_SET_CURRENT, id),
+    remove: (id, moveTo) => ipcRenderer.invoke(IPC.WS_DELETE, id, moveTo)
+  },
 
   // Project-wide search
   listFiles: (root) => ipcRenderer.invoke(IPC.LIST_FILES, root),
