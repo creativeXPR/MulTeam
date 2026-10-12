@@ -1,7 +1,8 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, shell } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { startRendererServer } = require('./server');
+const { IPC } = require('../shared/constants');
 
 // The app's navbar doubles as the window title bar (VS Code style): the
 // native frame is hidden and the OS draws only the min/max/close controls
@@ -82,6 +83,43 @@ function wireZoomShortcuts(win) {
   });
 }
 
+const APP_ICON = path.join(__dirname, '..', 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
+
+// window.open from the renderer: Firebase's sign-in popup (Google) opens as a
+// small MulTeam-branded window on top of the app; any other web link goes to
+// the user's browser instead of a bare Electron window.
+const AUTH_POPUP = /^https:\/\/([a-z0-9-]+\.)*(firebaseapp\.com|web\.app)\/__\/auth\/|^https:\/\/accounts\.google\.com\//i;
+function wirePopups(win) {
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (AUTH_POPUP.test(url)) {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          parent: win,
+          width: 480,
+          height: 640,
+          title: 'Sign in to MulTeam',
+          icon: APP_ICON,
+          backgroundColor: (customOverlay || TITLEBAR_COLORS[currentTheme]).color,
+          autoHideMenuBar: true,
+          minimizable: false,
+          maximizable: false,
+          webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
+        }
+      };
+    }
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  win.webContents.on('did-create-window', (child) => {
+    child.setMenu(null);
+    // keep our title instead of the provider's page titles
+    child.on('page-title-updated', (e) => e.preventDefault());
+    // Firebase only notices a closed popup ~8s later; tell the renderer now
+    child.on('closed', () => { if (!win.isDestroyed()) win.webContents.send(IPC.AUTH_POPUP_CLOSED); });
+  });
+}
+
 async function createMainWindow() {
   const rendererRoot = path.join(__dirname, '..', 'renderer');
   const server = await startRendererServer(rendererRoot, {
@@ -101,7 +139,7 @@ async function createMainWindow() {
     minHeight: 600,
     backgroundColor: (customOverlay || TITLEBAR_COLORS[currentTheme]).color,
     // Generated from public/logo-1024.png by `npm run icons`.
-    icon: path.join(__dirname, '..', 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
+    icon: APP_ICON,
     titleBarStyle: 'hidden',
     // macOS keeps its traffic lights; Windows/Linux get overlay controls.
     titleBarOverlay: process.platform === 'darwin' ? true : titleBarOverlayFor(currentTheme),
@@ -116,6 +154,7 @@ async function createMainWindow() {
   });
 
   wireZoomShortcuts(win);
+  wirePopups(win);
   // Zoom is per-origin in Chromium and the renderer's localhost port changes
   // every launch, so the saved level is re-applied on each load.
   win.webContents.on('did-finish-load', () => applyZoom(win, readState().zoomLevel || 0));

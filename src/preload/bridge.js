@@ -119,6 +119,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // multeam:// links (invite codes): the one that launched the app, and
   // any clicked while it's running
   takeLaunchLink: () => ipcRenderer.invoke(IPC.APP_TAKE_LINK),
+  // the Google sign-in window was closed (signed in, or abandoned)
+  onAuthPopupClosed: (cb) => { const h = () => cb(); ipcRenderer.on(IPC.AUTH_POPUP_CLOSED, h); return () => ipcRenderer.removeListener(IPC.AUTH_POPUP_CLOSED, h); },
   onOpenLink: (cb) => { const h = (_e, url) => cb(url); ipcRenderer.on(IPC.APP_OPEN_LINK, h); return () => ipcRenderer.removeListener(IPC.APP_OPEN_LINK, h); },
 
   // Run the active file in the terminal (main/runner.js)

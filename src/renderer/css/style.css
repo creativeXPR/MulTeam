@@ -1049,3 +1049,9 @@ button.secondary.danger-text { color: var(--danger); width: auto; }
   .share__item { flex-wrap: wrap; }
   .shared__item { flex-wrap: wrap; }
 }
+
+/* sign-in in progress: spinner in the clicked button, the rest dimmed */
+.btn-spinner { width: 13px; height: 13px; flex-shrink: 0; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin .7s linear infinite; }
+.modal-card.is-busy input, .modal-card.is-busy button:not(:has(.btn-spinner)) { opacity: .55; }
+.modal-card.is-busy button:has(.btn-spinner) { opacity: 1; cursor: progress; }
+button.primary:disabled:has(.btn-spinner) { background: var(--violet-500); }

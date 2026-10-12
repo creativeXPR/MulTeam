@@ -89,7 +89,8 @@ const IPC = Object.freeze({
   RUN_INSTALL_CMD: 'run:installCmd',
   RUN_OPEN_DOWNLOAD: 'run:openDownload',
   APP_OPEN_LINK: 'app:openLink',
-  APP_TAKE_LINK: 'app:takeLink'
+  APP_TAKE_LINK: 'app:takeLink',
+  AUTH_POPUP_CLOSED: 'auth:popupClosed'
 });
 
 const ROLES = Object.freeze({
