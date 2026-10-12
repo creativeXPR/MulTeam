@@ -6,27 +6,94 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isProjectMember(ownerId, projectId) {
-      let project = get(/databases/$(database)/documents/users/$(ownerId)/projects/$(projectId));
-      return isAuthenticated() && (project.data.collaborators[request.auth.uid] != null);
+    function signedIn() { return request.auth != null; }
+
+    // Cloud projects: projects/{projectId} with members.{uid}.role and
+    // memberUids (for "projects I'm in" queries). Membership changes go
+    // through the Cloud Functions in functions/index.js (admin SDK), which
+    // also mirror roles into RTDB projectMembers/ for live editing.
+    function projectData(projectId) {
+      return get(/databases/$(database)/documents/projects/$(projectId)).data;
     }
+    function isOwnerOf(projectId) {
+      return signedIn() && projectData(projectId).members[request.auth.uid].role == 'owner';
+    }
+    function isMemberOf(projectId) {
+      return signedIn() && request.auth.uid in projectData(projectId).memberUids;
+    }
+    function myEmail() { return request.auth.token.email.lower(); }
 
+    // Profiles: your own only (member names/emails live on the project).
     match /users/{userId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && request.auth.uid == userId;
+      allow read, write: if signedIn() && request.auth.uid == userId;
 
-      // Cloud-enabled projects live under their owner's doc (see
-      // main/projects.js for the matching local registry entry).
+      // Legacy location of cloud projects (before members/invites). Owners
+      // can still read + delete theirs while the app moves them to /projects.
       match /projects/{projectId} {
-        allow read: if isAuthenticated() && resource.data.collaborators[request.auth.uid] != null;
-        allow create: if isAuthenticated() && request.resource.data.ownerId == request.auth.uid && userId == request.auth.uid;
-        allow update, delete: if isAuthenticated() && resource.data.collaborators[request.auth.uid] == "owner";
+        allow read, delete: if signedIn() && request.auth.uid == userId;
       }
     }
 
+    match /projects/{projectId} {
+      allow read: if signedIn() && request.auth.uid in resource.data.memberUids;
+      // created by its owner, with only themselves as a member
+      allow create: if signedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.memberUids == [request.auth.uid]
+        && request.resource.data.members.keys().hasOnly([request.auth.uid])
+        && request.resource.data.members[request.auth.uid].role == 'owner'
+        && request.resource.data.name is string && request.resource.data.name.size() <= 120;
+      // the owner may rename it / set its repo; membership is functions-only
+      allow update: if signedIn() && resource.data.members[request.auth.uid].role == 'owner'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'repoUrl', 'updatedAt'])
+        && request.resource.data.name is string && request.resource.data.name.size() <= 120;
+      allow delete: if signedIn() && resource.data.members[request.auth.uid].role == 'owner';
+
+      // "needs approval" link joins; written by functions only
+      match /joinRequests/{uid} {
+        allow read: if signedIn() && (request.auth.uid == uid || isOwnerOf(projectId));
+        allow delete: if signedIn() && (request.auth.uid == uid || isOwnerOf(projectId));
+        allow create, update: if false;
+      }
+    }
+
+    // Email invites: created by the project owner; read by the owner or the
+    // invitee (matching, verified email). Accept/decline via functions.
+    match /invites/{inviteId} {
+      allow create: if signedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && isOwnerOf(request.resource.data.projectId)
+        && request.resource.data.invitedBy.uid == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.role in ['editor', 'viewer']
+        && request.resource.data.email is string
+        && request.resource.data.email == request.resource.data.email.lower()
+        && request.resource.data.email.matches('^[^@ ]+@[^@ ]+$')
+        && request.resource.data.email != myEmail();
+      allow read: if signedIn() && (
+        resource.data.ownerId == request.auth.uid
+        || (request.auth.token.email_verified == true && resource.data.email == myEmail()));
+      allow delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+      allow update: if false;
+    }
+
+    // Invite links / codes: owner-only; redeemed via the redeemCode function.
+    match /inviteLinks/{code} {
+      allow create: if signedIn()
+        && code.matches('^[A-Z0-9]{8}$')
+        && request.resource.data.ownerId == request.auth.uid
+        && isOwnerOf(request.resource.data.projectId)
+        && request.resource.data.role in ['editor', 'viewer']
+        && request.resource.data.requiresApproval is bool
+        && request.resource.data.revoked == false;
+      allow read, delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+      allow update: if signedIn() && resource.data.ownerId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['revoked']);
+    }
+
     match /documents/{docId} {
-      allow read, write: if isAuthenticated() && isProjectMember(resource.data.ownerId, resource.data.projectId);
-      allow create: if isAuthenticated() && isProjectMember(request.resource.data.ownerId, request.resource.data.projectId);
+      allow read, write: if isMemberOf(resource.data.projectId);
+      allow create: if isMemberOf(request.resource.data.projectId);
     }
 
     // ---------- Plugin gallery (renderer/js/firebase.js → gallery*) ----------

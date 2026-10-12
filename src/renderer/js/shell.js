@@ -612,7 +612,7 @@ projectForm.addEventListener('submit', async (e) => {
 function enableCloud(projectId, name) {
   return new Promise((resolve, reject) => {
     requireAuth(async () => {
-      try { await createCloudProject(projectId, name, currentUser.uid); resolve(); }
+      try { await createCloudProject(projectId, name, currentUser); resolve(); }
       catch (err) { reject(err); }
     });
   });

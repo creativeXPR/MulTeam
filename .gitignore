@@ -5,3 +5,4 @@ src/preload/dist/**
 src/renderer/js/firebaseConfig.js
 tests/emulator/.build/
 *-debug.log
+functions/node_modules/

@@ -11,8 +11,18 @@
   "storage": {
     "rules": "firebase/storage.rules"
   },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "multeam",
+      "ignore": ["node_modules", ".git", "*.log"]
+    }
+  ],
   "emulators": {
     "database": { "port": 9411 },
+    "firestore": { "port": 8187 },
+    "functions": { "port": 5011 },
+    "auth": { "port": 9109 },
     "ui": { "enabled": false },
     "singleProjectMode": true
   },
