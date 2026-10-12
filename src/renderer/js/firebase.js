@@ -279,6 +279,12 @@ export function watchProjectInvites(projectId, ownerId, cb) {
 
 export const revokeInvite = (inviteId) => deleteDoc(doc(firestore, 'invites', inviteId));
 
+// Everyone you've invited before (any project), for the Share email search.
+export async function listMyPastInvites(ownerId) {
+  const snap = await getDocs(query(collection(firestore, 'invites'), where('ownerId', '==', ownerId), limit(200)));
+  return snap.docs.map((d) => ({ email: d.data().email, projectName: d.data().projectName }));
+}
+
 // ---------- invite links / codes (owner side) ----------
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I
 const newCode = () => Array.from(crypto.getRandomValues(new Uint32Array(8)), (n) => CODE_CHARS[n % CODE_CHARS.length]).join('');

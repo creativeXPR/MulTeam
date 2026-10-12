@@ -5,8 +5,9 @@
 import {
   cloudCalls, watchCloudProject, watchMyCloudProjects, inviteByEmail, watchProjectInvites, revokeInvite,
   createInviteLink, watchInviteLinks, revokeInviteLink, watchJoinRequests, watchMyInvites, formatCode,
-  resendVerification, refreshUser, forgetLiveMembership
+  resendVerification, refreshUser, forgetLiveMembership, listMyPastInvites
 } from './firebase.js';
+import { enhanceSelects } from './select.js';
 
 const ROLE_LABEL = { owner: 'Owner', editor: 'Editor', viewer: 'Viewer' };
 const ROLE_HINT = { editor: 'can edit code', viewer: 'can watch and follow, not edit' };
@@ -36,11 +37,14 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
           <section class="share__sec" data-owner-only>
             <h3>Invite by email</h3>
             <form class="share__row" id="share-invite-form">
-              <input type="email" id="share-email" placeholder="teammate@example.com" autocomplete="off" required />
+              <div class="share__combo">
+                <input type="text" inputmode="email" class="share__input" id="share-email" placeholder="Name or email" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="share-suggest" aria-autocomplete="list" required />
+                <div class="cselect__menu share__suggest" id="share-suggest" role="listbox" hidden></div>
+              </div>
               <select class="pill" id="share-invite-role"><option value="editor">Editor</option><option value="viewer">Viewer</option></select>
               <button type="submit" class="primary sm" id="share-invite-btn">Invite</button>
             </form>
-            <p class="field-hint">They'll see it in MulTeam's notifications after signing in with that (verified) email.</p>
+            <p class="field-hint">Suggestions are people from your other projects and past invites. They'll see the invite in MulTeam's notifications after signing in with that (verified) email.</p>
             <div class="share__list" id="share-invites"></div>
           </section>
 
@@ -59,7 +63,7 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
             <div class="share__row">
               <select class="pill" id="share-link-role"><option value="editor">Joins as Editor</option><option value="viewer">Joins as Viewer</option></select>
               <select class="pill" id="share-link-expiry"><option value="1">Expires in 1 day</option><option value="7" selected>Expires in 7 days</option><option value="30">Expires in 30 days</option><option value="0">Never expires</option></select>
-              <label class="check-inline"><input type="checkbox" id="share-link-approval" /> Needs my approval</label>
+              <label class="toggle-field sm"><input type="checkbox" id="share-link-approval" /><span class="toggle-track"><span class="toggle-thumb"></span></span><span class="toggle-label">Needs my approval</span></label>
               <button type="button" class="secondary sm" id="share-link-create">Create link</button>
             </div>
             <div class="share__list" id="share-links"></div>
@@ -91,6 +95,7 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
     </div>`);
 
   const $ = (id) => document.getElementById(id);
+  enhanceSelects($('share-modal'));
 
   // ---------------------------------------------------------------- share
   const share = { project: null, unsubs: [], projectId: null };
@@ -132,6 +137,7 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
         $('share-leave').hidden = owner || !myRole;
         renderMembers(p, owner, me.uid);
         if (firstLoad && owner) {
+          listMyPastInvites(me.uid).then((list) => { pastInvites = list; }).catch(() => {});
           share.unsubs.push(watchProjectInvites(projectId, me.uid, renderInvites));
           share.unsubs.push(watchInviteLinks(projectId, me.uid, renderLinks));
           share.unsubs.push(watchJoinRequests(projectId, renderRequests));
@@ -152,6 +158,7 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
              <button type="button" class="ibtn" data-remove="${esc(uid)}" title="Remove from project" aria-label="Remove"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></svg></button>`
           : `<span class="share__role">${ROLE_LABEL[m.role] || m.role}</span>`}
       </div>`).join('');
+    enhanceSelects($('share-members'));
   }
 
   $('share-members').addEventListener('change', async (e) => {
@@ -189,11 +196,85 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
     } catch (err) { toast(cleanErr(err), 'error'); }
   });
 
+  // ---- email field: search people you already work with ----
+  // Contacts = members of your other cloud projects + people you invited
+  // before. (There's no search over all MulTeam users — that would expose
+  // everyone's email.)
+  let pastInvites = [];
+  let suggestions = [];
+  let cursor = -1;
+  const emailEl = $('share-email');
+  const suggestEl = $('share-suggest');
+
+  function contacts() {
+    const me = getUser();
+    const inProject = new Set(Object.values(share.project?.members || {}).map((m) => m.email));
+    const byEmail = new Map();
+    for (const p of myCloud) {
+      for (const [uid, m] of Object.entries(p.members || {})) {
+        if (uid === me?.uid || !m.email || inProject.has(m.email)) continue;
+        const c = byEmail.get(m.email) || { email: m.email, name: m.name || '', photo: m.photo || '', projects: [] };
+        if (!c.projects.includes(p.name)) c.projects.push(p.name);
+        byEmail.set(m.email, c);
+      }
+    }
+    for (const i of pastInvites) {
+      if (!i.email || inProject.has(i.email) || byEmail.has(i.email)) continue;
+      byEmail.set(i.email, { email: i.email, name: '', photo: '', projects: [], invited: true });
+    }
+    return [...byEmail.values()];
+  }
+
+  function renderSuggest() {
+    const q = emailEl.value.trim().toLowerCase();
+    suggestions = contacts()
+      .filter((c) => !q || c.email.includes(q) || c.name.toLowerCase().includes(q))
+      .sort((a, b) => b.projects.length - a.projects.length || a.email.localeCompare(b.email))
+      .slice(0, 8);
+    cursor = suggestions.length && q ? 0 : -1;
+    if (!suggestions.length || document.activeElement !== emailEl) { closeSuggest(); return; }
+    suggestEl.innerHTML = suggestions.map((c, i) => `
+      <button type="button" class="cselect__opt share__opt ${i === cursor ? 'is-cursor' : ''}" role="option" data-i="${i}">
+        <span class="share__av">${c.photo ? `<img src="${esc(c.photo)}" alt="" referrerpolicy="no-referrer" />` : esc(initialOf(c.name || c.email))}</span>
+        <span class="share__who"><b>${esc(c.name || c.email)}</b><small>${c.name ? `${esc(c.email)} · ` : ''}${c.projects.length ? `in ${esc(c.projects.slice(0, 2).join(', '))}${c.projects.length > 2 ? ` +${c.projects.length - 2}` : ''}` : 'invited before'}</small></span>
+      </button>`).join('');
+    suggestEl.hidden = false;
+    emailEl.setAttribute('aria-expanded', 'true');
+  }
+  function closeSuggest() { suggestEl.hidden = true; emailEl.setAttribute('aria-expanded', 'false'); cursor = -1; }
+  function moveCursor(d) {
+    if (suggestEl.hidden || !suggestions.length) return;
+    cursor = (cursor + d + suggestions.length) % suggestions.length;
+    suggestEl.querySelectorAll('.share__opt').forEach((b, i) => b.classList.toggle('is-cursor', i === cursor));
+    suggestEl.querySelector('.is-cursor')?.scrollIntoView({ block: 'nearest' });
+  }
+  function pick(i) {
+    const c = suggestions[i];
+    if (!c) return;
+    emailEl.value = c.email;
+    closeSuggest();
+    emailEl.focus();
+  }
+  emailEl.addEventListener('input', renderSuggest);
+  emailEl.addEventListener('focus', renderSuggest);
+  emailEl.addEventListener('blur', () => setTimeout(closeSuggest, 120));
+  emailEl.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (suggestEl.hidden) renderSuggest(); else moveCursor(1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); moveCursor(-1); }
+    else if (e.key === 'Enter' && !suggestEl.hidden && cursor >= 0 && suggestions[cursor]?.email !== emailEl.value.trim().toLowerCase()) { e.preventDefault(); pick(cursor); }
+    else if (e.key === 'Escape' && !suggestEl.hidden) { e.preventDefault(); e.stopPropagation(); closeSuggest(); }
+  });
+  suggestEl.addEventListener('mousedown', (e) => {
+    const b = e.target.closest('[data-i]');
+    if (b) { e.preventDefault(); pick(Number(b.dataset.i)); }
+  });
+
   // email invites
   $('share-invite-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const p = share.project;
     if (!p) return;
+    closeSuggest();
     const btn = $('share-invite-btn');
     btn.disabled = true;
     try {
@@ -278,6 +359,7 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
         <button type="button" class="primary sm" data-approve="${esc(r.uid)}">Approve</button>
         <button type="button" class="secondary sm" data-deny="${esc(r.uid)}" data-name="${esc(r.name || 'them')}">Deny</button>
       </div>`).join('');
+    enhanceSelects($('share-requests'));
   }
   $('share-requests').addEventListener('click', async (e) => {
     const approve = e.target.closest('[data-approve]');

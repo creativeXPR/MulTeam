@@ -1055,3 +1055,18 @@ button.secondary.danger-text { color: var(--danger); width: auto; }
 .modal-card.is-busy input, .modal-card.is-busy button:not(:has(.btn-spinner)) { opacity: .55; }
 .modal-card.is-busy button:has(.btn-spinner) { opacity: 1; cursor: progress; }
 button.primary:disabled:has(.btn-spinner) { background: var(--violet-500); }
+
+/* share: email search + approval toggle in the app's own style */
+.share__combo { position: relative; flex: 1; min-width: 200px; }
+.share__input { width: 100%; height: 30px; font-size: 12.5px; background: transparent; border: 1px solid var(--line); color: var(--text); padding: 0 12px; border-radius: var(--r-pill); outline: none; transition: border-color .15s; }
+.share__input::placeholder { color: var(--muted); }
+.share__input:focus { border-color: var(--violet-400); }
+.share__suggest { position: absolute; top: calc(100% + 4px); left: 0; right: 0; }
+.share__opt { gap: 10px; padding: 6px 8px; white-space: normal; }
+.share__opt .share__av { width: 22px; height: 22px; font-size: 10px; }
+.toggle-field.sm { margin: 0; gap: 8px; }
+.toggle-field.sm .toggle-track { width: 28px; height: 16px; }
+.toggle-field.sm .toggle-thumb { width: 12px; height: 12px; }
+.toggle-field.sm input:checked + .toggle-track .toggle-thumb { transform: translateX(12px); }
+.toggle-field.sm .toggle-label { font-size: 12px; font-weight: 400; color: var(--text-2); }
+.toggle-field input:focus-visible + .toggle-track { outline: 2px solid var(--violet-400); outline-offset: 2px; }
