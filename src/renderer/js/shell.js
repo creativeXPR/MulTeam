@@ -195,11 +195,27 @@ promptModal.addEventListener('click', (e) => { if (e.target === promptModal) set
 /* ============================================================
    Auth state
    ============================================================ */
+// Signed out: a person icon. Signed in: the account photo, else the initial.
+const PERSON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8.5" r="3.6"/><path d="M5 20c.9-3.6 3.7-5.6 7-5.6s6.1 2 7 5.6"/></svg>';
+function paintAvatar(el, user) {
+  el.classList.toggle('is-anon', !user);
+  if (!user) { el.innerHTML = PERSON_SVG; return; }
+  const initial = escapeHtml((user.displayName || user.email || '?')[0].toUpperCase());
+  if (!user.photoURL) { el.textContent = initial; return; }
+  const img = document.createElement('img');
+  img.alt = '';
+  img.referrerPolicy = 'no-referrer';
+  img.src = user.photoURL;
+  img.onerror = () => { el.textContent = initial; };
+  el.replaceChildren(img);
+}
+paintAvatar(document.getElementById('avatarInitials'), null);
+paintAvatar(document.getElementById('profileAvatar'), null);
+
 watchAuthState((user) => {
   currentUser = user;
-  const initials = user ? (user.displayName || user.email || '?')[0].toUpperCase() : '?';
-  document.getElementById('avatarInitials').textContent = initials;
-  document.getElementById('profileAvatar').textContent = initials;
+  paintAvatar(document.getElementById('avatarInitials'), user);
+  paintAvatar(document.getElementById('profileAvatar'), user);
   document.getElementById('profileName').textContent = user ? (user.displayName || user.email) : 'Not signed in';
   document.getElementById('profileEmail').textContent = user ? user.email : 'Sign in for cloud sync';
   document.getElementById('profileSigninBtn').hidden = !!user;

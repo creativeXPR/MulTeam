@@ -236,7 +236,13 @@ html[data-theme="dark"] #themeBtn .i-moon { display: block; }
   display: grid; place-items: center; transition: border-color .15s;
 }
 .avatarbtn:hover { border-color: var(--violet-400); }
-.avatarbtn span { font-size: 10px; font-weight: 600; color: var(--text-2); }
+.avatarbtn { overflow: hidden; }
+.avatarbtn span { font-size: 10px; font-weight: 600; color: var(--text-2); display: grid; place-items: center; width: 100%; height: 100%; }
+.avatarbtn span svg { width: 14px; height: 14px; }
+.avatarbtn img, .profile__av img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
+.profile__av { overflow: hidden; }
+.profile__av.is-anon { background: var(--fill); color: var(--text-2); }
+.profile__av.is-anon svg { width: 18px; height: 18px; }
 
 .cmdcenter {
   display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 10px;
