@@ -65,6 +65,17 @@ const TOKEN_SCOPES = [
   ['invalid', ['invalid.illegal', 'invalid']]
 ];
 
+// 'light' | 'dark' | 'hcLight' | 'hcDark' — from the theme file's "type", else the
+// package's uiTheme (vs, vs-dark, hc-light, hc-black).
+function themeKind(vs, uiTheme) {
+  const t = String(vs?.type || '').toLowerCase();
+  if (t === 'light' || t === 'dark') return t;
+  if (t === 'hclight' || t === 'hc-light') return 'hcLight';
+  if (t === 'hc' || t === 'hcdark' || t === 'hc-black') return 'hcDark';
+  return { vs: 'light', 'hc-light': 'hcLight', 'hc-black': 'hcDark' }[uiTheme] || 'dark';
+}
+const isLightKind = (k) => k === 'light' || k === 'hcLight';
+
 function normalizeHex(c) {
   if (typeof c !== 'string') return null;
   let h = c.trim().replace(/^#/, '');
@@ -73,8 +84,8 @@ function normalizeHex(c) {
 }
 
 export function toMonacoTheme(vs, uiTheme) {
-  const type = vs.type || (uiTheme === 'vs' ? 'light' : uiTheme === 'hc-black' ? 'hc' : 'dark');
-  const base = type === 'light' ? 'vs' : type === 'hc' ? 'hc-black' : 'vs-dark';
+  const type = themeKind(vs, uiTheme);
+  const base = { light: 'vs', hcLight: 'hc-light', hcDark: 'hc-black' }[type] || 'vs-dark';
   const rules = [];
   const entries = []; // { scope, fg, fontStyle, order }
   const tokenColors = Array.isArray(vs.tokenColors) ? vs.tokenColors : [];
@@ -124,8 +135,8 @@ export function toMonacoTheme(vs, uiTheme) {
 // Maps a VS Code theme's workbench colors onto MulTeam's design tokens so a
 // color theme restyles the whole app, not just the editor.
 export function toAppPalette(vs, uiTheme) {
-  const type = vs.type || (uiTheme === 'vs' ? 'light' : uiTheme === 'hc-black' ? 'hc' : 'dark');
-  const mode = type === 'light' ? 'light' : 'dark';
+  const type = themeKind(vs, uiTheme);
+  const mode = isLightKind(type) ? 'light' : 'dark';
   const c = vs.colors || {};
   const pick = (...keys) => { for (const k of keys) { const h = normalizeHex(c[k]); if (h) return `#${h}`; } return null; };
   const solid = (hex) => hex.slice(0, 7);
@@ -256,7 +267,7 @@ export function initExtensions({ toast, confirmDialog, pick, onIconThemeChange =
     const before = getSettings().editorTheme || '';
     const items = [
       ...(onlyExtId ? [] : [{ label: 'MulTeam (light / dark)', detail: 'built-in', value: '' }]),
-      ...themes.map((t) => ({ label: t.label, detail: `${t.extName} · ${t.uiTheme === 'vs' ? 'light' : 'dark'}`, value: t.key }))
+      ...themes.map((t) => ({ label: t.label, detail: `${t.extName} · ${t.uiTheme === 'vs' || t.uiTheme === 'hc-light' ? 'light' : 'dark'}`, value: t.key }))
     ];
     if (!items.length) { toast('Install a theme from the Extensions view first', 'error'); return; }
     pick({
