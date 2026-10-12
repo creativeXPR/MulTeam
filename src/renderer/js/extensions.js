@@ -246,8 +246,18 @@ export function initExtensions({ toast, confirmDialog, pick, onIconThemeChange =
   // The theme's `light` section overrides entries while the app is light.
   function resolveIconTheme(t, def) {
     const dir = posixDir(t.path.replace(/^\.\//, ''));
+    const url = (id) => {
+      const d = def.iconDefinitions?.[id];
+      if (!d || typeof d.iconPath !== 'string' || !d.iconPath) return null; // font-based / placeholder icons aren't supported
+      const rel = posixNormalize(`${dir}/${d.iconPath}`);
+      return `/ext-assets/${encodeURIComponent(t.extId)}/${rel.split('/').map(encodeURIComponent).join('/')}`;
+    };
+    // Light overrides only win when they point at a real image — some themes
+    // (e.g. VSCode Icons) ship empty light placeholders, which would leave
+    // folders with no icon at all.
     const light = getEffectiveTheme() === 'light' && def.light ? def.light : null;
-    const merged = (k) => ({ ...(def[k] || {}), ...((light && light[k]) || {}) });
+    const pick = (k) => (light && url(light[k]) ? light[k] : def[k]);
+    const merged = (k) => ({ ...(def[k] || {}), ...Object.fromEntries(Object.entries((light && light[k]) || {}).filter(([, id]) => url(id))) });
     const lower = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k.toLowerCase(), v]));
     const extToLang = {};
     for (const lang of monaco.languages.getLanguages()) {
@@ -257,15 +267,10 @@ export function initExtensions({ toast, confirmDialog, pick, onIconThemeChange =
       }
     }
     return {
-      url(id) {
-        const d = def.iconDefinitions?.[id];
-        if (!d || typeof d.iconPath !== 'string') return null; // font-based icons aren't supported
-        const rel = posixNormalize(`${dir}/${d.iconPath}`);
-        return `/ext-assets/${encodeURIComponent(t.extId)}/${rel.split('/').map(encodeURIComponent).join('/')}`;
-      },
-      file: (light && light.file) || def.file,
-      folder: (light && light.folder) || def.folder,
-      folderExpanded: (light && light.folderExpanded) || def.folderExpanded,
+      url,
+      file: pick('file'),
+      folder: pick('folder'),
+      folderExpanded: pick('folderExpanded'),
       fileNames: lower(merged('fileNames')),
       fileExtensions: lower(merged('fileExtensions')),
       folderNames: lower(merged('folderNames')),
