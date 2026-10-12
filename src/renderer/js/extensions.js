@@ -26,28 +26,43 @@ const LANG_ALIAS = { javascriptreact: 'javascript', typescriptreact: 'typescript
 
 // TextMate scopes (what VS Code themes use) → Monaco's Monarch token names.
 // Monaco rules match by token prefix, so a few aliases cover most languages.
-const SCOPE_ALIASES = [
-  ['comment', ['comment']],
-  ['string.regexp', ['regexp']],
-  ['string', ['string']],
-  ['constant.numeric', ['number']],
-  ['constant.language', ['keyword']],
-  ['constant.character.escape', ['string.escape']],
-  ['keyword.operator', ['operator', 'delimiter']],
-  ['keyword', ['keyword']],
-  ['storage', ['keyword']],
-  ['entity.name.type', ['type', 'type.identifier']],
-  ['entity.name.class', ['type', 'type.identifier']],
-  ['support.type.property-name', ['string.key.json', 'attribute.name']],
-  ['support.type', ['type', 'type.identifier']],
-  ['support.class', ['type', 'type.identifier']],
-  ['entity.name.tag', ['tag']],
-  ['entity.other.attribute-name', ['attribute.name']],
-  ['variable', ['identifier', 'variable']],
-  ['punctuation', ['delimiter']],
-  ['markup.heading', ['keyword.md']],
-  ['meta.tag', ['tag']],
-  ['invalid', ['invalid']]
+// Monaco's tokenizers emit generic tokens ("keyword.js", "string.js",
+// "identifier.ts"…); VS Code themes color TextMate scopes. For each Monaco
+// token we name the TextMate scopes VS Code would give that text (most
+// representative first) and pick the theme rule that matches best, using
+// TextMate rules: a rule scope matches when it equals the scope or is a
+// dot-prefix of it; the longest match wins, then the later rule.
+const TOKEN_SCOPES = [
+  ['comment', ['comment.line.double-slash', 'comment']],
+  ['comment.doc', ['comment.block.documentation', 'comment.block', 'comment']],
+  ['string', ['string.quoted.double', 'string']],
+  ['string.escape', ['constant.character.escape', 'string']],
+  ['string.key.json', ['support.type.property-name.json', 'support.type.property-name', 'string']],
+  ['string.value.json', ['string.quoted.double.json', 'string']],
+  ['regexp', ['string.regexp']],
+  ['number', ['constant.numeric.decimal', 'constant.numeric']],
+  ['keyword', ['storage.type', 'keyword.control', 'keyword']],
+  ['keyword.flow', ['keyword.control.flow', 'keyword.control', 'keyword']],
+  ['operator', ['keyword.operator']],
+  ['delimiter', ['punctuation.separator', 'punctuation']],
+  ['type', ['entity.name.type', 'support.type', 'entity.name.class']],
+  ['type.identifier', ['entity.name.type', 'support.type', 'entity.name.class']],
+  ['identifier', ['variable.other.readwrite', 'variable.other', 'variable']],
+  ['variable', ['variable.other.readwrite', 'variable']],
+  ['variable.predefined', ['variable.language', 'support.variable', 'variable']],
+  ['variable.parameter', ['variable.parameter']],
+  ['constant', ['constant.language', 'constant']],
+  ['predefined', ['support.function', 'entity.name.function']],
+  ['annotation', ['meta.decorator', 'entity.name.function.decorator']],
+  ['metatag', ['meta.preprocessor', 'entity.name.tag']],
+  ['namespace', ['entity.name.namespace', 'entity.name.type.module']],
+  ['tag', ['entity.name.tag']],
+  ['attribute.name', ['entity.other.attribute-name']],
+  ['attribute.value', ['string.quoted.double.html', 'string']],
+  ['keyword.md', ['markup.heading', 'entity.name.section']],
+  ['strong', ['markup.bold']],
+  ['emphasis', ['markup.italic']],
+  ['invalid', ['invalid.illegal', 'invalid']]
 ];
 
 function normalizeHex(c) {
@@ -61,24 +76,41 @@ export function toMonacoTheme(vs, uiTheme) {
   const type = vs.type || (uiTheme === 'vs' ? 'light' : uiTheme === 'hc-black' ? 'hc' : 'dark');
   const base = type === 'light' ? 'vs' : type === 'hc' ? 'hc-black' : 'vs-dark';
   const rules = [];
+  const entries = []; // { scope, fg, fontStyle, order }
   const tokenColors = Array.isArray(vs.tokenColors) ? vs.tokenColors : [];
-  for (const tc of tokenColors) {
+  tokenColors.forEach((tc, order) => {
     const st = tc.settings || {};
     const fg = normalizeHex(st.foreground);
-    if (!fg && !st.fontStyle) continue;
+    const fontStyle = typeof st.fontStyle === 'string' ? st.fontStyle : undefined;
+    if (!fg && fontStyle === undefined) return;
     const scopes = Array.isArray(tc.scope) ? tc.scope : String(tc.scope || '').split(',');
+    if (!tc.scope) { if (fg) rules.push({ token: '', foreground: fg }); return; } // default foreground
     for (const raw of scopes) {
       const scope = raw.trim();
-      if (!scope) {
-        // a scope-less entry sets the default foreground
-        if (fg) rules.push({ token: '', foreground: fg });
-        continue;
-      }
-      const tokens = new Set([scope]);
-      const hit = SCOPE_ALIASES.find(([prefix]) => scope === prefix || scope.startsWith(`${prefix}.`) || scope.startsWith(`${prefix} `));
-      if (hit) hit[1].forEach((t) => tokens.add(t));
-      for (const token of tokens) rules.push({ token, ...(fg ? { foreground: fg } : {}), ...(st.fontStyle ? { fontStyle: st.fontStyle } : {}) });
+      // descendant selectors ("string variable", "source.js keyword") need a
+      // scope stack Monaco doesn't have — skip them
+      if (scope && !/\s/.test(scope)) entries.push({ scope, fg, fontStyle, order });
     }
+  });
+  const best = (target, prop) => {
+    let hit = null;
+    for (const e of entries) {
+      if (e[prop] === undefined || e[prop] === null) continue;
+      if (target !== e.scope && !target.startsWith(`${e.scope}.`)) continue;
+      if (!hit || e.scope.length > hit.scope.length || (e.scope.length === hit.scope.length && e.order > hit.order)) hit = e;
+    }
+    return hit;
+  };
+  const defaultFg = rules.find((r) => r.token === '' && r.foreground)?.foreground || normalizeHex(vs.colors?.['editor.foreground']);
+  for (const [token, targets] of TOKEN_SCOPES) {
+    let fg = null;
+    let fontStyle;
+    for (const t of targets) { const h = best(t, 'fg'); if (h) { fg = h.fg; break; } }
+    for (const t of targets) { const h = best(t, 'fontStyle'); if (h) { fontStyle = h.fontStyle; break; } }
+    // like VS Code, text the theme doesn't color uses its default foreground
+    // (never Monaco's built-in vs/vs-dark token colors)
+    fg = fg || defaultFg;
+    if (fg || fontStyle !== undefined) rules.push({ token, ...(fg ? { foreground: fg } : {}), ...(fontStyle !== undefined ? { fontStyle } : {}) });
   }
   const colors = {};
   for (const [k, v] of Object.entries(vs.colors || {})) {
