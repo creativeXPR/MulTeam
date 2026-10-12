@@ -382,6 +382,7 @@ multeam.on('save', ({ path }) =&gt; {});</code></pre>
                 <div class="bpanel__tabs" id="bpanelTabs">
                   <button type="button" data-ptab="problems">Problems <span class="bpanel__count" id="problemsTabCount" hidden>0</span></button>
                   <button type="button" data-ptab="terminal">Terminal</button>
+                  <button type="button" data-ptab="plugin" title="Plugin checks and output">Plugin <span class="bpanel__count" id="pluginTabCount" hidden>0</span></button>
                 </div>
                 <div class="bpanel__actions">
                   <div class="bpanel__actions" data-pfor="terminal">
@@ -399,6 +400,7 @@ multeam.on('save', ({ path }) =&gt; {});</code></pre>
                 </div>
               </div>
               <div class="bpanel__body scroll" data-ppane="problems" id="problemsList"></div>
+              <div class="bpanel__body pdev" data-ppane="plugin" id="pluginDevPane"></div>
               <div class="bpanel__body term" data-ppane="terminal">
                 <div class="term__host" id="termHost"></div>
                 <div class="term__list scroll" id="termList" hidden></div>

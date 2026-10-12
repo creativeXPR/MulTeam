@@ -7,22 +7,11 @@
 // is best-effort hardening, not a security boundary — only install plugins
 // you trust.
 import * as monaco from 'monaco-editor';
+import pluginApi from '../../shared/pluginApi.js';
 
-const PERMISSION_FOR = {
-  'editor.getText': 'editor',
-  'editor.getSelectedText': 'editor',
-  'editor.replaceSelection': 'editor',
-  'editor.insertText': 'editor',
-  'editor.getFile': 'editor',
-  'workspace.getRoot': 'workspace.read',
-  'workspace.listFiles': 'workspace.read',
-  'workspace.readFile': 'workspace.read',
-  'workspace.writeFile': 'workspace.write',
-  'window.showMessage': null,
-  'window.showError': null,
-  'window.showInput': null,
-  'window.setStatus': null
-};
+// Which permission each host call needs — shared with the plugin linter
+// (main/pluginLint.js) so the two can't drift apart.
+const PERMISSION_FOR = pluginApi.CALLS;
 
 // Runs inside the worker before the plugin's own code.
 const BOOTSTRAP = `
@@ -34,6 +23,20 @@ const BOOTSTRAP = `
     while (o) { try { delete o[name]; } catch {} o = Object.getPrototypeOf(o); }
     try { Object.defineProperty(self, name, { value: undefined, writable: false, configurable: false }); } catch {}
   }
+})();
+// console.* and unhandled rejections go to MulTeam's Plugin panel (Output).
+(() => {
+  const fmt = (v) => {
+    if (v instanceof Error) return v.stack || String(v);
+    if (v && typeof v === 'object') { try { return JSON.stringify(v); } catch {} }
+    return String(v);
+  };
+  for (const level of ['log', 'info', 'warn', 'error', 'debug']) {
+    console[level] = (...args) => { try { postMessage({ t: 'log', level, text: args.map(fmt).join(' ').slice(0, 4000) }); } catch {} };
+  }
+  self.addEventListener('unhandledrejection', (e) => {
+    try { postMessage({ t: 'log', level: 'error', text: 'Unhandled promise rejection: ' + fmt(e.reason) }); } catch {}
+  });
 })();
 const __pending = new Map();
 let __seq = 0;
@@ -117,7 +120,9 @@ function safeRelative(rel) {
 
 // `space` (pluginSpace.js) owns the plugin pane: it handles creating from a
 // template and gallery publish/unpublish, and may add buttons to each card.
-export function initPluginHost({ app, toast, confirmDialog, promptDialog, commands, space = {} }) {
+// `onLog(id, { level, text, at })` receives the plugin's console output,
+// crashes and failed commands (the Plugin panel's Output — see pluginDev.js).
+export function initPluginHost({ app, toast, confirmDialog, promptDialog, commands, space = {}, onLog = () => {} }) {
   const api = window.electronAPI?.plugins;
   const listEl = document.getElementById('pluginList');
   const statusHost = document.getElementById('pluginStatus');
@@ -127,6 +132,21 @@ export function initPluginHost({ app, toast, confirmDialog, promptDialog, comman
   const runtimeErrors = new Map();      // id -> message
   const completionLangs = new Map();    // lang -> Set(pluginId)
   const providers = new Map();          // lang -> monaco disposable
+  const BOOTSTRAP_LINES = BOOTSTRAP.split('\n').length + 1; // lines before the plugin's line 1
+
+  // Worker stack frames say multeam-plugin:<id>/main.js:<line>:<col> where
+  // <line> counts the bootstrap too — rewrite them to the plugin's own
+  // lines. Frames before or after the plugin's code are MulTeam's sandbox
+  // wrapper, not the plugin — label them so they don't point at bogus lines.
+  const mapLines = (id, text) => String(text).replace(
+    /multeam-plugin:([\w-]+)\/([^\s:)]+):(\d+):(\d+)/g,
+    (_m, _id, file, line, col) => {
+      const n = Number(line) - BOOTSTRAP_LINES;
+      const max = running.get(id)?.codeLines || Infinity;
+      return n < 1 || n > max ? '(MulTeam runtime)' : `${file}:${n}:${col}`;
+    }
+  );
+  const log = (id, level, text) => onLog(id, { level, text: mapLines(id, text), at: Date.now() });
 
   // ---------- host-side API ----------
   async function handleCall(rt, m, a) {
@@ -243,7 +263,7 @@ export function initPluginHost({ app, toast, confirmDialog, promptDialog, comman
     const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
     const worker = new Worker(url, { name: `plugin:${manifest.id}` });
     URL.revokeObjectURL(url);
-    const rt = { worker, manifest, pending: new Map(), rid: 0 };
+    const rt = { worker, manifest, pending: new Map(), rid: 0, codeLines: code.split('\n').length };
     running.set(manifest.id, rt);
 
     worker.onmessage = async (e) => {
@@ -259,6 +279,8 @@ export function initPluginHost({ app, toast, confirmDialog, promptDialog, comman
         if (!completionLangs.has(msg.lang)) completionLangs.set(msg.lang, new Set());
         completionLangs.get(msg.lang).add(manifest.id);
         ensureProvider(msg.lang);
+      } else if (msg.t === 'log') {
+        log(manifest.id, msg.level, msg.text);
       } else if (msg.t === 'done') {
         const p = rt.pending.get(msg.rid);
         if (!p) return;
@@ -269,11 +291,12 @@ export function initPluginHost({ app, toast, confirmDialog, promptDialog, comman
     worker.onerror = (e) => {
       e.preventDefault();
       // map the worker's line number back to the plugin's own main.js
-      const where = e.lineno ? ` (line ${Math.max(1, e.lineno - BOOTSTRAP.split('\n').length - 1)})` : '';
+      const where = e.lineno ? ` (line ${Math.max(1, e.lineno - BOOTSTRAP_LINES)})` : '';
       runtimeErrors.set(manifest.id, `${e.message || 'Plugin crashed'}${where}`);
       toast(`${manifest.name} failed: ${e.message || 'error'}`, 'error');
       stop(manifest.id);
       render();
+      log(manifest.id, 'error', `Crashed: ${e.message || 'error'}${where} — the plugin was stopped.`);
     };
   }
 
@@ -281,7 +304,10 @@ export function initPluginHost({ app, toast, confirmDialog, promptDialog, comman
     const rt = running.get(id);
     if (!rt) return;
     try { await request(rt, { t: 'run', cmd: cmdId }); }
-    catch (err) { toast(`${rt.manifest.name}: ${cleanErr(err)}`, 'error'); }
+    catch (err) {
+      toast(`${rt.manifest.name}: ${cleanErr(err)}`, 'error');
+      log(id, 'error', `Command "${cmdId}" failed: ${cleanErr(err)}`);
+    }
   }
 
   function cleanErr(err) {
@@ -325,6 +351,7 @@ export function initPluginHost({ app, toast, confirmDialog, promptDialog, comman
           <div class="ext__meta">${p.permissions.length ? p.permissions.map((x) => `<span class="perm">${escapeHtml(x)}</span>`).join('') : '<span>no permissions</span>'}${live ? '<span class="plugin__live">● running</span>' : ''}</div>
           ${err ? `<div class="plugin__err">${escapeHtml(err)}</div>` : ''}
           <div class="ext__acts">
+            <button type="button" class="chipbtn is-primary" data-plugin-act="edit" data-id="${escapeHtml(p.id)}" title="Open this plugin as a project in the Plugins workspace">Edit in MulTeam</button>
             <button type="button" class="chipbtn" data-plugin-act="reload" data-id="${escapeHtml(p.id)}" ${p.enabled ? '' : 'disabled'}>Reload</button>
             <button type="button" class="chipbtn" data-plugin-act="folder" data-id="${escapeHtml(p.id)}">Open folder</button>
             <button type="button" class="chipbtn" data-plugin-act="export" data-id="${escapeHtml(p.id)}" ${p.error ? 'disabled' : ''}>Export</button>
@@ -360,7 +387,8 @@ export function initPluginHost({ app, toast, confirmDialog, promptDialog, comman
         const installed = await api.installPackage();
         if (installed) { await loadAll(); toast(`Installed ${installed.name} ${installed.version}`); }
       }
-      if (act === 'reload' && p) { await api.list().then((l) => { plugins = l; }); const fresh = plugins.find((x) => x.id === p.id); if (fresh && !fresh.error) await start(fresh); render(); toast(`${p.name} reloaded`); }
+      if (act === 'edit' && p) return space.onEdit?.(p);
+      if (act === 'reload' && p) { await reload(p.id); toast(`${p.name} reloaded`); }
       if (act === 'folder' && p) await api.openFolder(p.id);
       if (act === 'export' && p) {
         const file = await api.exportPackage(p.id);
@@ -381,9 +409,30 @@ export function initPluginHost({ app, toast, confirmDialog, promptDialog, comman
     }
   });
 
+  // Re-reads the manifest + code and restarts one plugin (if it's enabled).
+  // Returns the fresh manifest, or null if it's not installed.
+  async function reload(id) {
+    plugins = await api.list();
+    const fresh = plugins.find((x) => x.id === id);
+    if (fresh && fresh.enabled && !fresh.error) {
+      await start(fresh);
+      log(id, 'info', `Reloaded ${fresh.name} ${fresh.version}`);
+    } else if (fresh?.error) {
+      stop(id);
+      log(id, 'error', `Not started: ${fresh.error}`);
+    } else if (fresh && !fresh.enabled) {
+      log(id, 'warn', `${fresh.name} is disabled — switch it on in Plugins to run it.`);
+    }
+    render();
+    return fresh || null;
+  }
+
   loadAll();
 
   return {
+    reload,
+    isRunning: (id) => running.has(id),
+    runtimeError: (id) => runtimeErrors.get(id) || null,
     emit(event, data) { for (const rt of running.values()) rt.worker.postMessage({ t: 'event', ev: event, data }); },
     reloadAll: loadAll,
     runningCount: () => running.size,

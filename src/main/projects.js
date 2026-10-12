@@ -199,6 +199,49 @@ async function deleteWorkspace(id, moveTo) {
   return { ...data, movedTo: target.id };
 }
 
+// ---------- the Plugins workspace ----------
+// "Edit in MulTeam" on a plugin card opens that plugin's folder as its own
+// project inside a reserved workspace (fixed id, so renaming it is fine and
+// deleting it just means it's recreated on the next edit). One project per
+// plugin, tagged with `pluginId`.
+const PLUGINS_WS = 'plugins';
+
+async function ensurePluginsWorkspace() {
+  const data = await readWorkspaces();
+  if (!data.workspaces.some((w) => w.id === PLUGINS_WS)) {
+    data.workspaces.push({ id: PLUGINS_WS, name: 'Plugins', createdAt: Date.now() });
+    await writeWorkspaces(data);
+  }
+  return data;
+}
+
+async function openPluginProject({ pluginId, name, folderPath }) {
+  await ensurePluginsWorkspace();
+  const existing = (await listProjects()).find((p) => p.pluginId === pluginId);
+  const record = existing
+    ? await writeRecord({ ...existing, name, folderPath, workspaceId: PLUGINS_WS, lastOpenedAt: Date.now() })
+    : await writeRecord({
+      id: crypto.randomUUID(),
+      name,
+      folderPath,
+      cloudEnabled: false,
+      workspaceId: PLUGINS_WS,
+      pluginId,
+      createdAt: Date.now(),
+      lastOpenedAt: Date.now()
+    });
+  await setCurrentWorkspace(PLUGINS_WS);
+  return record;
+}
+
+// Uninstalling a plugin drops its project record (its folder is already gone).
+async function forgetPluginProject(pluginId) {
+  const dir = await ensureRegistryDir();
+  for (const p of await listProjects()) {
+    if (p.pluginId === pluginId) await fs.rm(path.join(dir, `${p.id}.json`), { force: true });
+  }
+}
+
 function setupProjectHandlers(ipcMain, IPC) {
   ipcMain.handle(IPC.WS_LIST, () => readWorkspaces());
   ipcMain.handle(IPC.WS_CREATE, (_e, name) => createWorkspace(name));
@@ -213,4 +256,4 @@ function setupProjectHandlers(ipcMain, IPC) {
   ipcMain.handle(IPC.DUPLICATE_PROJECT, (_e, id) => duplicateProject(id));
 }
 
-module.exports = { setupProjectHandlers };
+module.exports = { setupProjectHandlers, openPluginProject, forgetPluginProject };

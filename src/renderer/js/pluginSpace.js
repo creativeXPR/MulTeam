@@ -35,7 +35,7 @@ const cleanErr = (err) => {
 
 const permissionList = (perms) => (perms?.length ? perms.map((p) => `• ${PERMISSION_TEXT[p] || p}`).join('\n') : '• no special permissions');
 
-export function initPluginSpace({ toast, confirmDialog, promptDialog, getPluginHost, openTutorial }) {
+export function initPluginSpace({ toast, confirmDialog, promptDialog, getPluginHost, openTutorial, editPlugin }) {
   const api = window.electronAPI.plugins;
   const tabsEl = document.getElementById('pluginTabs');
   const search = document.getElementById('pluginSearch');
@@ -221,7 +221,8 @@ export function initPluginSpace({ toast, confirmDialog, promptDialog, getPluginH
       const made = await api.scaffold(name, tpl.id);
       await host()?.reloadAll();
       setTab('installed');
-      toast(`Created ${made.id} — press "Open folder" to edit main.js, then Reload`);
+      toast(`Created ${made.id} — opening it for editing`);
+      editPlugin?.(made.id);
     } catch (err) { toast(cleanErr(err), 'error'); }
   });
 
@@ -262,6 +263,7 @@ multeam.on('open' | 'save', fn)</pre>
     showTab: setTab,
     // used by pluginHost cards
     onCreate: () => setTab('templates'),
+    onEdit: (p) => editPlugin?.(p.id),
     onPublish: publish,
     onUnpublish: unpublish,
     isPublishedByMe: (id) => !!(gallery && auth.currentUser && gallery.find((g) => g.id === id && g.authorUid === auth.currentUser.uid))

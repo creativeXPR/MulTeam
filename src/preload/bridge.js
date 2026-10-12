@@ -91,7 +91,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     installPackage: () => ipcRenderer.invoke(IPC.PLUGIN_INSTALL_PACKAGE),
     pack: (id) => ipcRenderer.invoke(IPC.PLUGIN_PACK, id),
     installFromGallery: (base64, sha256) => ipcRenderer.invoke(IPC.PLUGIN_INSTALL_GALLERY, base64, sha256),
-    openFolder: (id) => ipcRenderer.invoke(IPC.PLUGIN_OPEN_FOLDER, id)
+    openFolder: (id) => ipcRenderer.invoke(IPC.PLUGIN_OPEN_FOLDER, id),
+    edit: (id) => ipcRenderer.invoke(IPC.PLUGIN_EDIT, id),
+    check: (id) => ipcRenderer.invoke(IPC.PLUGIN_CHECK, id)
   },
 
   // Language support: language servers installed on demand, LSP over IPC

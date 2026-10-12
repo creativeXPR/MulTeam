@@ -7,6 +7,8 @@ const { app, dialog, shell, BrowserWindow } = require('electron');
 const crypto = require('node:crypto');
 const AdmZip = require('adm-zip');
 const { TEMPLATES } = require('./pluginTemplates');
+const { lintPlugin } = require('./pluginLint');
+const { openPluginProject, forgetPluginProject } = require('./projects');
 const fs = require('node:fs/promises');
 const fsSync = require('node:fs');
 const path = require('node:path');
@@ -96,6 +98,7 @@ async function installFromFolder(event) {
 async function uninstall(id) {
   if (!ID_RE.test(id)) throw new Error('Invalid plugin id.');
   await fs.rm(path.join(pluginsRoot(), id), { recursive: true, force: true });
+  await forgetPluginProject(id);
   const state = await readState();
   state.disabled = state.disabled.filter((x) => x !== id);
   await writeState(state);
@@ -106,6 +109,37 @@ async function setEnabled(id, enabled) {
   state.disabled = state.disabled.filter((x) => x !== id);
   if (!enabled) state.disabled.push(id);
   await writeState(state);
+}
+
+// ---------- editing inside MulTeam ----------
+// Opens the plugin's own folder as a project in the "Plugins" workspace.
+async function openForEditing(id) {
+  if (!ID_RE.test(id)) throw new Error('Invalid plugin id.');
+  const dir = path.join(pluginsRoot(), id);
+  if (!fsSync.existsSync(dir)) throw new Error('That plugin is no longer installed.');
+  let name = id;
+  let main = 'main.js';
+  try {
+    const m = JSON.parse(await fs.readFile(path.join(dir, MANIFEST), 'utf8'));
+    name = String(m.name || id);
+    main = String(m.main || 'main.js');
+  } catch { /* a broken manifest is exactly what you'd open it to fix */ }
+  const project = await openPluginProject({ pluginId: id, name, folderPath: dir });
+  return { project, mainPath: path.join(dir, main), manifestPath: path.join(dir, MANIFEST) };
+}
+
+// The static half of the plugin debug engine (see pluginLint.js). Paths in
+// the result are absolute so the renderer can mark the right editor model.
+async function check(id) {
+  if (!ID_RE.test(id)) throw new Error('Invalid plugin id.');
+  const dir = path.join(pluginsRoot(), id);
+  const read = (rel) => {
+    const file = path.resolve(dir, rel);
+    if (!file.startsWith(dir + path.sep)) return null;
+    try { return fsSync.readFileSync(file, 'utf8'); } catch { return null; }
+  };
+  const diagnostics = lintPlugin({ manifestText: read(MANIFEST), folderName: id, readFile: read });
+  return { dir, diagnostics: diagnostics.map((d) => ({ ...d, path: path.join(dir, d.file) })) };
 }
 
 // ---------- templates ----------
@@ -244,6 +278,8 @@ function setupPluginHandlers(ipcMain, IPC) {
   ipcMain.handle(IPC.PLUGIN_INSTALL_PACKAGE, (e) => installPackageFile(e));
   ipcMain.handle(IPC.PLUGIN_PACK, (_e, id) => packForPublish(id));
   ipcMain.handle(IPC.PLUGIN_INSTALL_GALLERY, (_e, base64, sha256) => installFromGallery(base64, sha256));
+  ipcMain.handle(IPC.PLUGIN_EDIT, (_e, id) => openForEditing(id));
+  ipcMain.handle(IPC.PLUGIN_CHECK, (_e, id) => check(id));
   ipcMain.handle(IPC.PLUGIN_OPEN_FOLDER, async (_e, id) => {
     if (!ID_RE.test(id)) throw new Error('Invalid plugin id.');
     const err = await shell.openPath(path.join(pluginsRoot(), id));

@@ -63,6 +63,8 @@ const IPC = Object.freeze({
   PLUGIN_INSTALL_PACKAGE: 'plugin:installPackage',
   PLUGIN_PACK: 'plugin:pack',
   PLUGIN_INSTALL_GALLERY: 'plugin:installGallery',
+  PLUGIN_EDIT: 'plugin:edit',
+  PLUGIN_CHECK: 'plugin:check',
   LSP_LIST: 'lsp:list',
   LSP_INSTALL: 'lsp:install',
   LSP_UNINSTALL: 'lsp:uninstall',

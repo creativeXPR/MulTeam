@@ -16,6 +16,7 @@ import { initSidebarResize } from './sidebarResize.js';
 import { initExtensions } from './extensions.js';
 import { initPluginHost } from './pluginHost.js';
 import { initPluginSpace } from './pluginSpace.js';
+import { initPluginDev } from './pluginDev.js';
 import { initLanguageSupport } from './languageSupport.js';
 import { initFormatting } from './formatting.js';
 import { initBreadcrumbs } from './breadcrumbs.js';
@@ -717,6 +718,8 @@ async function openProjectView(p) {
 
   renderPanelProjects(); // mounts #file-tree under this project's panel row
   go('editor');
+  // A plugin's own project (Plugins workspace): point the Plugin tab at it.
+  if (p.pluginId) { pluginDev.select(p.pluginId); pluginDev.check(p.pluginId, { quiet: true }); }
   scm.refresh();
   document.getElementById('explorerActs').hidden = false;
   window.electronAPI.watchPath(rootFolder).catch(() => { /* explorer still works, just no auto-refresh */ });
@@ -1449,6 +1452,7 @@ async function saveActiveFile(filePath, { explicit = false } = {}) {
   writeDoc(doc).then(() => {
     scm.refreshSoon();
     pluginHost.emit('save', { path: filePath });
+    pluginDev.onSaved(filePath);
     languageSupport.onFileSaved(doc.model);
   });
 }
@@ -2134,6 +2138,8 @@ const palette = initCommandPalette({
     { label: 'Plugins: New from template', action: () => { showSide('plugins'); pluginSpace.showTab('templates'); } },
     { label: 'Plugins: Tutorial', action: () => go('tutorial') },
     { label: 'Plugins: Reload all', action: () => pluginHost.reloadAll().then(() => toast('Plugins reloaded')) },
+    { label: 'Plugins: Check current plugin', action: () => { bottomPanel.open('plugin'); pluginDev.check(); } },
+    { label: 'Plugins: Show plugin output', action: () => { bottomPanel.open('plugin'); pluginDev.render(); } },
     { label: 'Extensions: Install themes & snippets', hint: 'Ctrl+Shift+X', action: () => showSide('ext') },
     { label: 'Refresh Explorer', action: () => refreshTree() },
     { label: 'Collapse folders in Explorer', action: () => collapseTree() },
@@ -2454,12 +2460,37 @@ const pluginSpace = initPluginSpace({
   confirmDialog,
   promptDialog,
   getPluginHost: () => pluginHost,
-  openTutorial: () => go('tutorial')
+  openTutorial: () => go('tutorial'),
+  editPlugin: (id) => editPlugin(id)
 });
+
+// Plugin debug engine (bottom panel → Plugin): checks + live output.
+const pluginDev = initPluginDev({
+  getHost: () => pluginHost,
+  openFileAt: (filePath, line, column) => openFileAt(filePath, line, column),
+  openPanel: () => bottomPanel.open('plugin'),
+  toast,
+  getProject: () => project,
+  joinPath: (dir, rel) => joinPath(dir, rel)
+});
+
+// "Edit in MulTeam" on a plugin card: open the plugin's folder as its own
+// project in the Plugins workspace (main/plugins.js openForEditing), open
+// its entry file, check it and show the Plugin tab.
+async function editPlugin(id) {
+  let res;
+  try { res = await window.electronAPI.plugins.edit(id); } catch (err) { toast(cleanError(err), 'error'); return; }
+  await refreshProjects(); // main switched the current workspace to Plugins
+  await openProjectView(res.project);
+  if (project?.id !== res.project.id) return; // switch was cancelled
+  try { await openFile(res.mainPath); } catch { await openFile(res.manifestPath).catch(() => {}); }
+  await pluginDev.focus(id);
+}
 
 // What plugins may touch (each call is permission-checked in pluginHost.js).
 const pluginHost = initPluginHost({
   space: pluginSpace,
+  onLog: (id, entry) => pluginDev.addLog(id, entry),
   toast,
   confirmDialog,
   promptDialog,
