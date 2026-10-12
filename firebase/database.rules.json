@@ -3,33 +3,44 @@
     ".read": false,
     ".write": false,
 
-    "docs": {
-      "$docId": {
-        ".read": "auth != null",
-        ".write": "auth != null",
-
-        "updates": {
-          "$pushId": {
-            ".validate": "newData.hasChildren(['state', 'origin'])"
-          }
-        },
-
-        "awareness": {
-          "$clientId": {
-            ".write": "auth != null"
-          }
-        },
-
-        "snapshot": {
-          ".validate": "newData.hasChildren(['state', 'updatedAt'])"
+    "projectMembers": {
+      "$projectId": {
+        ".read": "auth != null && data.child(auth.uid).exists()",
+        ".write": "auth != null && (data.child(auth.uid).val() === 'owner' || (!data.exists() && newData.child(auth.uid).val() === 'owner'))",
+        "$uid": {
+          ".validate": "newData.val() === 'owner' || newData.val() === 'editor' || newData.val() === 'viewer'"
         }
       }
     },
 
-    "projectMembers": {
+    "projects": {
       "$projectId": {
-        ".read": "auth != null && data.child(auth.uid).exists()",
-        ".write": false
+        ".write": "auth != null && !newData.exists() && root.child('projectMembers').child($projectId).child(auth.uid).val() === 'owner'",
+
+        "docs": {
+          "$fileKey": {
+            ".read": "auth != null && root.child('projectMembers').child($projectId).child(auth.uid).exists()",
+
+            "updates": {
+              "$pushId": {
+                ".write": "auth != null && (root.child('projectMembers').child($projectId).child(auth.uid).val() === 'owner' || root.child('projectMembers').child($projectId).child(auth.uid).val() === 'editor') && (!data.exists() || !newData.exists())",
+                ".validate": "newData.hasChildren(['state', 'origin']) && newData.child('state').isString() && newData.child('state').val().length <= 1000000 && newData.child('origin').isNumber()"
+              }
+            },
+
+            "snapshot": {
+              ".write": "auth != null && (root.child('projectMembers').child($projectId).child(auth.uid).val() === 'owner' || root.child('projectMembers').child($projectId).child(auth.uid).val() === 'editor')",
+              ".validate": "newData.hasChildren(['state', 'updatedAt']) && newData.child('state').isString()"
+            },
+
+            "awareness": {
+              "$clientId": {
+                ".write": "auth != null && root.child('projectMembers').child($projectId).child(auth.uid).exists()",
+                ".validate": "newData.isString() && newData.val().length <= 20000"
+              }
+            }
+          }
+        }
       }
     }
   }

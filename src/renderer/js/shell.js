@@ -1,4 +1,5 @@
-import { watchAuthState, watchCloudConnection, signOut, createCloudProject, deleteCloudProject, upsertDocumentMeta } from './firebase.js';
+import { watchAuthState, watchCloudConnection, signOut, createCloudProject, deleteCloudProject, upsertDocumentMeta, ensureLiveMembership } from './firebase.js';
+import { fileKeyFor } from './sync.js';
 import { requireAuth, openSignIn } from './authModal.js';
 import { FileDocument, EditorView, setMonacoTheme } from './editor.js';
 import { PresenceBar } from './presence.js';
@@ -892,9 +893,6 @@ function collapseTree() {
   });
 }
 
-function sanitizeDocId(relativePath) {
-  return `${project.id}__${relativePath}`.replace(/[.#$\[\]/\\]/g, '_');
-}
 
 function currentFileTreeEl() { return document.getElementById('file-tree'); }
 
@@ -1113,8 +1111,18 @@ async function openDoc(filePath) {
   rec.opening = (async () => {
     const content = await window.electronAPI.readFile(filePath);
     const rel = filePath.slice(rootFolder.length).replace(/^[\\/]/, '');
-    const docId = sanitizeDocId(rel);
-    const doc = new FileDocument(filePath, { docId, currentUser, collaborative: !!project?.cloudEnabled }).init(content);
+    const cloud = !!project?.cloudEnabled;
+    const fileKey = fileKeyFor(rel);
+    const docId = `${project.id}__${fileKey}`;
+    if (cloud) {
+      try { await ensureLiveMembership(project.id, currentUser.uid); } catch (err) { console.warn('[cloud] membership check failed:', err?.message || err); }
+    }
+    const doc = new FileDocument(filePath, {
+      live: cloud ? { projectId: project.id, fileKey } : null,
+      currentUser,
+      collaborative: cloud,
+      onDenied: () => toast(`Live editing isn't available for ${rel}. You may not be a member of this project, or you're offline. Edits stay local.`, 'error')
+    }).init(content);
     rec.doc = doc;
     rec.opening = null;
     rec.sub = doc.model.onDidChangeContent(() => {

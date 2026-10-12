@@ -144,8 +144,10 @@ export const MarkerSeverity = monaco.MarkerSeverity;
 // live-collaboration plumbing (Yjs + Firebase) and the copy known on disk.
 // ------------------------------------------------------------------
 export class FileDocument {
-  constructor(filePath, { docId, currentUser, collaborative = false }) {
-    Object.assign(this, { filePath, docId, currentUser, collaborative });
+  // live: { projectId, fileKey } for cloud projects; onDenied(err) when the
+  // live document can't be reached (not a member, rules, offline…)
+  constructor(filePath, { live = null, currentUser, collaborative = false, onDenied } = {}) {
+    Object.assign(this, { filePath, live, currentUser, collaborative, onDenied });
     this.ydoc = collaborative ? new Y.Doc() : null;
     this.provider = null;
     this.binding = null;
@@ -167,10 +169,9 @@ export class FileDocument {
     if (!this.collaborative) return this;
 
     const yText = this.ydoc.getText('monaco');
-    // Seed the shared type from disk only if no one has synced content yet —
-    // otherwise every new peer opening the file would stomp the live doc.
-    if (yText.length === 0 && initialContent) yText.insert(0, initialContent);
-    this.provider = new FirebaseProvider(this.docId, this.ydoc);
+    // The provider seeds the live doc from disk only if none exists yet (once,
+    // by transaction); otherwise the shared text arrives from Firebase.
+    this.provider = new FirebaseProvider({ ...this.live, seedText: initialContent }, this.ydoc, { onDenied: this.onDenied });
     // The editors set is live: views added later get remote cursors too.
     this.binding = new MonacoBinding(yText, this.model, this.editors, this.provider.awareness);
     this.provider.awareness.on('change', this.binding._rerenderDecorations);

@@ -11,6 +11,11 @@
   "storage": {
     "rules": "firebase/storage.rules"
   },
+  "emulators": {
+    "database": { "port": 9411 },
+    "ui": { "enabled": false },
+    "singleProjectMode": true
+  },
   "hosting": {
     "site": "multeam",
     "public": "public",
