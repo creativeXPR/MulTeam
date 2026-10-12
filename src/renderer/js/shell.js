@@ -143,7 +143,11 @@ const confirmModal = document.getElementById('confirm-modal');
 const confirmOkBtn = document.getElementById('confirm-ok');
 let confirmResolve = null;
 
-function confirmDialog({ title, message, confirmLabel = 'Confirm', danger = false }) {
+// altLabel adds a second action; the promise then resolves to 'alt' for it.
+function confirmDialog({ title, message, confirmLabel = 'Confirm', danger = false, altLabel = '' }) {
+  const alt = document.getElementById('confirm-alt');
+  alt.hidden = !altLabel;
+  alt.textContent = altLabel;
   document.getElementById('confirm-title').textContent = title;
   document.getElementById('confirm-message').textContent = message;
   confirmOkBtn.textContent = confirmLabel;
@@ -162,6 +166,7 @@ function settleConfirm(result) {
 }
 confirmOkBtn.addEventListener('click', () => settleConfirm(true));
 document.getElementById('confirm-cancel').addEventListener('click', () => settleConfirm(false));
+document.getElementById('confirm-alt').addEventListener('click', () => settleConfirm('alt'));
 confirmModal.addEventListener('click', (e) => { if (e.target === confirmModal) settleConfirm(false); });
 
 // Text-input counterpart to confirmDialog (resolves to the string, or null).
@@ -786,6 +791,7 @@ const pathKey = (p) => String(p).replace(/\\/g, '/').toLowerCase();
 const TAB_MIME = 'application/x-multeam-tab';
 const FILE_MIME = 'application/x-multeam-file';
 const GICON = {
+  run: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.6v12.8a1 1 0 0 0 1.5.86l10.2-6.4a1 1 0 0 0 0-1.72L9.5 4.74A1 1 0 0 0 8 5.6Z"/></svg>',
   right: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M12 4.5v15"/></svg>',
   down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M3.5 12h17"/></svg>',
   close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></svg>'
@@ -804,6 +810,7 @@ function createGroup() {
   el.innerHTML = `<div class="egroup__head">
       <div class="tab-bar" role="tablist"></div>
       <div class="egroup__acts">
+        <button type="button" class="ibtn egroup__run" data-gact="run" title="Run File in Terminal (Ctrl+F5)" hidden>${GICON.run}</button>
         <button type="button" class="ibtn" data-gact="split-right" title="Split Editor Right (Ctrl+\\)">${GICON.right}</button>
         <button type="button" class="ibtn" data-gact="split-down" title="Split Editor Down">${GICON.down}</button>
         <button type="button" class="ibtn" data-gact="close-group" title="Close Group">${GICON.close}</button>
@@ -825,6 +832,7 @@ function createGroup() {
   el.querySelector('.egroup__acts').addEventListener('click', (e) => {
     const b = e.target.closest('[data-gact]');
     if (!b) return;
+    if (b.dataset.gact === 'run') { focusGroup(g); runFile(g.activePath); }
     if (b.dataset.gact === 'split-right') splitEditor(g, 'right');
     if (b.dataset.gact === 'split-down') splitEditor(g, 'bottom');
     if (b.dataset.gact === 'close-group') closeGroup(g);
@@ -1068,6 +1076,7 @@ function renderGroupTabs(g) {
     g.tabBar.appendChild(tabEl);
   }
   g.el.classList.toggle('has-tabs', g.tabs.length > 0);
+  g.el.querySelector('[data-gact="run"]').hidden = !isRunnable(g.activePath);
 }
 
 function renderTabs() { for (const g of groups.values()) renderGroupTabs(g); }
@@ -1260,6 +1269,51 @@ function handleDrop(dt, g, zone, index) {
 }
 document.addEventListener('dragend', clearAllDropMarks);
 document.addEventListener('drop', clearAllDropMarks);
+
+// ---------- run file (▷): in the terminal, with the right interpreter ----------
+let runnableExts = new Set();
+window.electronAPI.run?.extensions().then((list) => { runnableExts = new Set(list); renderTabs(); }).catch(() => {});
+const isRunnable = (p) => !!p && runnableExts.has(p.split(/[\/]/).pop().split('.').pop().toLowerCase());
+
+async function runFile(filePath = focusedGroup?.activePath) {
+  if (!filePath) return;
+  const name = filePath.split(/[\/]/).pop();
+  const rec = documents.get(pathKey(filePath));
+  if (rec?.doc) {
+    try { await writeDoc(rec.doc); } catch (err) { toast(`Couldn't save ${name}: ${cleanError(err)}`, 'error'); return; }
+  }
+  let plan;
+  try { plan = await window.electronAPI.run.plan(filePath, terminal.runShellId()); } catch (err) { toast(cleanError(err), 'error'); return; }
+  if (plan.unsupported) { toast(`MulTeam can't run ${name} in the terminal`, 'error'); return; }
+  if (plan.missing) { promptInstallRunner(plan); return; }
+  await runInTerminal(plan.cmd, plan.cwd);
+}
+
+async function runInTerminal(cmd, cwd) {
+  go('editor');
+  const ok = await terminal.run(() => cmd, { cwd });
+  if (ok && (!bottomPanel.isOpen() || bottomPanel.currentTab() !== 'terminal')) bottomPanel.open('terminal');
+}
+
+// The interpreter/compiler isn't installed: install it (winget, in the
+// terminal so progress and prompts are visible) or open its download page.
+async function promptInstallRunner({ language, missing }) {
+  const why = missing.outdated
+    ? `Running ${language} files needs ${missing.name} — the version installed is too old.`
+    : `Running ${language} files needs ${missing.name}, which isn't installed (or isn't on your PATH).`;
+  const choice = await confirmDialog({
+    title: `Install ${missing.name.replace(/^an? /, '')}?`,
+    message: missing.winget
+      ? `${why} MulTeam can install it now with winget in the terminal. When it finishes, press Run again.`
+      : `${why} Open the download page to install it, then press Run again.`,
+    confirmLabel: missing.winget ? 'Install now' : 'Open download page',
+    altLabel: missing.winget ? 'Download page' : ''
+  });
+  if (choice === 'alt' || (choice === true && !missing.winget)) { window.electronAPI.run.openDownload(missing.key); return; }
+  if (choice !== true) return;
+  const cmd = await window.electronAPI.run.installCommand(missing.key);
+  if (cmd) runInTerminal(cmd);
+}
 
 // ---------- saving ----------
 // `explicit` = the user asked to save (Ctrl+S / File → Save). Only then is
@@ -2218,7 +2272,9 @@ initMenubar(document.getElementById('menubar'), [
     { label: 'New Terminal', kbd: 'Ctrl+Shift+`', run: () => openTerminalNew() },
     { label: 'Toggle Terminal', kbd: 'Ctrl+`', run: () => toggleTerminal() },
     '-',
-    { label: 'Kill Terminal…', run: () => terminal.killActive(), enabled: () => terminal.hasActive(), danger: true }
+    { label: 'Kill Terminal…', run: () => terminal.killActive(), enabled: () => terminal.hasActive(), danger: true },
+    '-',
+    { label: 'Run Active File', kbd: 'Ctrl+F5', run: () => runFile(), enabled: () => isRunnable(activeTabPath) }
   ] },
   { label: 'Help', items: [
     { label: 'Show Help', run: openHelp },
@@ -2318,6 +2374,7 @@ function appShortcut(e) {
   if (!e.shiftKey && k === 'b') return toggleSidebar;
   if (!e.shiftKey && k === 'j') return () => (bottomPanel.isOpen() ? bottomPanel.close() : (go('editor'), bottomPanel.open()));
   if (!e.shiftKey && k === 'w' && activeTabPath) return () => closeTab(activeTabPath);
+  if (!e.shiftKey && e.key === 'F5' && isRunnable(activeTabPath)) return () => runFile();
   if (!e.shiftKey && e.key === '\\') return () => { go('editor'); splitEditor(focusedGroup, 'right'); };
   if (!e.shiftKey && /^[1-9]$/.test(e.key) && currentView === 'editor') {
     const target = orderedGroups()[Number(e.key) - 1];

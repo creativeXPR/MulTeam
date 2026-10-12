@@ -76,7 +76,11 @@ const IPC = Object.freeze({
   TERM_RESIZE: 'term:resize',
   TERM_KILL: 'term:kill',
   TERM_DATA: 'term:data',
-  TERM_EXIT: 'term:exit'
+  TERM_EXIT: 'term:exit',
+  RUN_EXTENSIONS: 'run:extensions',
+  RUN_PLAN: 'run:plan',
+  RUN_INSTALL_CMD: 'run:installCmd',
+  RUN_OPEN_DOWNLOAD: 'run:openDownload'
 });
 
 const ROLES = Object.freeze({

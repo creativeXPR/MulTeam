@@ -107,6 +107,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     hasEslint: (filePath, root) => ipcRenderer.invoke(IPC.TOOL_HAS_ESLINT, filePath, root)
   },
 
+  // Run the active file in the terminal (main/runner.js)
+  run: {
+    extensions: () => ipcRenderer.invoke(IPC.RUN_EXTENSIONS),
+    plan: (filePath, shellId) => ipcRenderer.invoke(IPC.RUN_PLAN, filePath, shellId),
+    installCommand: (key) => ipcRenderer.invoke(IPC.RUN_INSTALL_CMD, key),
+    openDownload: (key) => ipcRenderer.invoke(IPC.RUN_OPEN_DOWNLOAD, key)
+  },
+
   // Integrated terminal (node-pty in the main process)
   terminal: {
     listShells: () => ipcRenderer.invoke(IPC.TERM_SHELLS),

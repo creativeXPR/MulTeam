@@ -56,7 +56,7 @@ function setupTerminalHandlers(ipcMain, IPC) {
     owner.once('destroyed', () => killSession(id));
     owner.once('did-navigate', () => killSession(id)); // main-frame loads/reloads only
 
-    return { id, shell: shell.label, cwd: workDir };
+    return { id, shell: shell.label, shellId: shell.id, cwd: workDir };
   });
 
   ipcMain.on(IPC.TERM_WRITE, (_e, id, data) => sessions.get(id)?.proc.write(data));

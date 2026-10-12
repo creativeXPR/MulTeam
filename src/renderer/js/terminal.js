@@ -39,7 +39,7 @@ export function initTerminal({ panel, getCwd, confirmDialog }) {
   const sessions = new Map(); // id -> { term, fit, el, label, exited }
   let activeId = null;
 
-  if (!api) { host.textContent = 'Terminal unavailable — the preload script failed to load.'; return { ensureOne() {}, create() {}, killActive() {}, hasActive: () => false }; }
+  if (!api) { host.textContent = 'Terminal unavailable — the preload script failed to load.'; return { ensureOne() {}, create() {}, killActive() {}, hasActive: () => false, run: async () => false, runShellId: () => '' }; }
 
   api.listShells().then((shells) => {
     shellSelect.innerHTML = shells.map((s) => `<option value="${s.id}">${s.label}</option>`).join('');
@@ -64,7 +64,7 @@ export function initTerminal({ panel, getCwd, confirmDialog }) {
   }
   new ResizeObserver(() => fitActive()).observe(host);
 
-  async function create({ cwd } = {}) {
+  async function create({ cwd, label } = {}) {
     const settings = getSettings();
     const term = new Terminal({
       fontFamily: settings.fontFamily,
@@ -88,12 +88,32 @@ export function initTerminal({ panel, getCwd, confirmDialog }) {
       info = await api.create({ shellId: shellSelect.value, cwd: cwd || getCwd(), cols: term.cols, rows: term.rows });
     } catch (err) {
       term.write(`\x1b[31mCouldn't start the shell: ${String(err.message || err)}\x1b[0m\r\n`);
-      return;
+      return null;
     }
 
-    sessions.set(info.id, { term, fit, el, label: info.shell, exited: false });
+    sessions.set(info.id, { term, fit, el, label: label ? `${label} · ${info.shell}` : info.shell, shellId: info.shellId, exited: false });
     term.onData((data) => api.write(info.id, data));
     activate(info.id);
+    return info.id;
+  }
+
+  // Types a command into the "Run" terminal (re-used while it's alive, like
+  // VS Code's Code Runner). buildCommand(shellId) → command text, or null.
+  let runId = null;
+  async function run(buildCommand, { cwd } = {}) {
+    let s = runId && sessions.get(runId);
+    if (!s || s.exited) {
+      runId = await create({ cwd, label: 'Run' });
+      s = runId && sessions.get(runId);
+      if (!s) return false;
+      // let the shell print its prompt before typing into it
+      await new Promise((r) => setTimeout(r, 450));
+    }
+    const cmd = await buildCommand(s.shellId);
+    if (!cmd) return false;
+    activate(runId);
+    api.write(runId, `${cmd}\r`);
+    return true;
   }
 
   function activate(id) {
@@ -163,6 +183,9 @@ export function initTerminal({ panel, getCwd, confirmDialog }) {
     ensureOne() { if (!sessions.size) create(); else requestAnimationFrame(fitActive); },
     create,
     killActive() { if (activeId) kill(activeId); },
+    run,
+    // the shell the next run will type into (the live Run terminal's, else the selected one)
+    runShellId: () => { const s = runId && sessions.get(runId); return s && !s.exited ? s.shellId : shellSelect.value; },
     hasActive: () => activeId !== null
   };
 }
