@@ -1,4 +1,4 @@
-const { dialog, BrowserWindow, shell } = require('electron');
+const { app, dialog, BrowserWindow, shell } = require('electron');
 const fs = require('node:fs/promises');
 const fsSync = require('node:fs');
 const path = require('node:path');
@@ -75,6 +75,8 @@ function setupFileSystemHandlers(ipcMain) {
 
   ipcMain.handle(IPC.WRITE_FILE, async (_event, filePath, content) => {
     try {
+      // collaborators can create files in folders that don't exist here yet
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
       await fs.writeFile(filePath, content, 'utf-8');
       return true;
     } catch (err) {
@@ -98,6 +100,27 @@ function setupFileSystemHandlers(ipcMain) {
     } catch (err) {
       throw new Error(`Failed to create folder: ${err.message}`);
     }
+  });
+
+  // Before a collaborator's live version first replaces a file that differs
+  // locally, the local copy is kept under userData/backups/<project>/<time>/.
+  ipcMain.handle(IPC.BACKUP_FILE, async (_event, projectId, relPath, content) => {
+    const safeId = String(projectId).replace(/[^A-Za-z0-9_-]/g, '');
+    const rel = path.normalize(String(relPath)).split(path.sep).filter((p) => p && p !== '..').join(path.sep);
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const dest = path.join(app.getPath('userData'), 'backups', safeId, stamp, rel);
+    if (!dest.startsWith(path.join(app.getPath('userData'), 'backups'))) throw new Error('Invalid backup path.');
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+    await fs.writeFile(dest, String(content), 'utf-8');
+    return dest;
+  });
+
+  // Deletes that arrive from collaborators go to the Recycle Bin/Trash, so
+  // nothing a teammate does can permanently remove your files.
+  ipcMain.handle(IPC.TRASH_ENTRY, async (_event, entryPath) => {
+    try { await fs.access(entryPath); } catch { return false; } // already gone
+    await shell.trashItem(entryPath);
+    return true;
   });
 
   ipcMain.handle(IPC.DELETE_ENTRY, async (_event, entryPath) => {
@@ -143,6 +166,12 @@ function setupFileSystemHandlers(ipcMain) {
       // recursive: the Explorer needs to hear about changes in subfolders too
       // (supported on Windows/macOS, and Linux on recent Node/Electron)
       watcher = fsSync.watch(watchPath, { recursive: true }, (eventType, filename) => {
+        // Git moving HEAD (commit, checkout, pull, reset, merge) is passed on as
+        // a `git` signal: live collaboration must not re-broadcast what Git wrote
+        if (filename && /^\.git[\\/](HEAD|ORIG_HEAD|MERGE_HEAD|logs[\\/]HEAD)$/.test(filename)) {
+          if (!sender.isDestroyed()) sender.send(IPC.FILE_CHANGED, { path: watchPath, filename, eventType, git: true });
+          return;
+        }
         if (filename && /(^|[\\/])(\.git|node_modules)([\\/]|$)/.test(filename)) return; // VCS/deps churn
         if (sender.isDestroyed()) return;
         sender.send(IPC.FILE_CHANGED, { path: watchPath, filename, eventType });

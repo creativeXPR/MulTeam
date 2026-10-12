@@ -52,7 +52,17 @@ async function status(root) {
   });
 }
 
+// A file's text at HEAD (null if untracked/no commits). Untrimmed: live
+// collaboration compares it byte-for-byte with the working copy.
+async function headContent(root, relPath) {
+  try {
+    const g = simpleGit({ baseDir: root, trimmed: false });
+    return await g.show([`HEAD:./${String(relPath).split('\\').join('/')}`]);
+  } catch { return null; }
+}
+
 function setupGitHandlers(ipcMain, IPC) {
+  ipcMain.handle(IPC.GIT_HEAD_CONTENT, (_e, root, relPath) => headContent(root, relPath));
   ipcMain.handle(IPC.GIT_STATUS, (_e, root) => status(root));
   ipcMain.handle(IPC.GIT_INIT, (_e, root) => wrap(() => git(root).init()));
   ipcMain.handle(IPC.GIT_STAGE, (_e, root, paths) => wrap(() => git(root).add(paths)));

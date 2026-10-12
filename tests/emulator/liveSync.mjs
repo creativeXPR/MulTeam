@@ -44,7 +44,9 @@ const eq = (a, b, what) => { if (a !== b) throw new Error(`${what}: expected ${J
 
 const db = (uid) => (uid ? env.authenticatedContext(uid) : env.unauthenticatedContext()).database();
 const P = 'proj1';
-const doc = `projects/${P}/docs/${fileKeyFor('src/app.js')}`;
+const doc = `projects/${P}/b/main/docs/${fileKeyFor('src/app.js')}`;
+const idx = `projects/${P}/b/main/files/${fileKeyFor('src/app.js')}`;
+const entry = (by, extra = {}) => ({ path: 'src/app.js', kind: 'file', state: 'live', by, client: 'c1', at: 1, ...extra });
 const upd = { state: 'AAA=', origin: 1 };
 
 // ================= rules =================
@@ -84,9 +86,22 @@ await check('members (incl. viewers) can read docs', () => assertSucceeds(db('ca
 await check('strangers cannot read docs', () => assertFails(db('eve').ref(doc).get()));
 await check('viewer can share presence', () => assertSucceeds(db('carol').ref(`${doc}/awareness/123`).set('AAA=')));
 await check('stranger cannot share presence', () => assertFails(db('eve').ref(`${doc}/awareness/124`).set('AAA=')));
+await check('editor writes a file-index entry as themselves', () => assertSucceeds(db('bob').ref(idx).set(entry('bob'))));
+await check('index entries must name the writer', () => assertFails(db('bob').ref(idx).set(entry('alice'))));
+await check('index entries are validated', () => assertFails(db('bob').ref(idx).set(entry('bob', { state: 'weird' }))));
+await check('viewer cannot write the index', () => assertFails(db('carol').ref(idx).set(entry('carol'))));
+await check('members (incl. viewers) read the index', () => assertSucceeds(db('carol').ref(`projects/${P}/b/main/files`).get()));
+await check('strangers cannot read the index', () => assertFails(db('eve').ref(`projects/${P}/b/main/files`).get()));
+await check('editor can delete a live doc (file deleted)', () => assertSucceeds(db('bob').ref(doc).remove()));
+await check('viewer cannot delete a live doc', async () => {
+  await db('bob').ref(`${doc}/snapshot`).set({ state: 'AAA=', updatedAt: 1 });
+  await assertFails(db('carol').ref(doc).remove());
+});
+await check('editor cannot replace a whole doc', () => assertFails(db('bob').ref(doc).set({ snapshot: { state: 'AAA=', updatedAt: 1 } })));
 await check('editor cannot wipe the project', () => assertFails(db('bob').ref(`projects/${P}`).remove()));
 await check('owner can wipe the project live data', () => assertSucceeds(db('alice').ref(`projects/${P}`).remove()));
 await check('old unscoped docs/ path is closed', () => assertFails(db('alice').ref('docs/x/updates').push(upd)));
+await check('stage-0 project docs/ path (no branch) is closed', () => assertFails(db('alice').ref(`projects/${P}/docs/x/updates`).push(upd)));
 
 // ================= provider =================
 await env.withSecurityRulesDisabled((ctx) => ctx.database().ref(`projectMembers/p2`).set({ alice: 'owner', bob: 'editor', carol: 'viewer' }));
@@ -94,7 +109,7 @@ const client = (uid, fileKey, seedText) => {
   useDb(db(uid)._delegate);
   const ydoc = new Y.Doc();
   let denied = null;
-  const provider = new FirebaseProvider({ projectId: 'p2', fileKey, seedText }, ydoc, { onDenied: (e) => { denied = e; } });
+  const provider = new FirebaseProvider({ projectId: 'p2', branchKey: 'main', fileKey, seedText }, ydoc, { onDenied: (e) => { denied = e; } });
   return { ydoc, provider, text: () => ydoc.getText('monaco').toString(), denied: () => denied };
 };
 
@@ -143,7 +158,7 @@ await check('concurrent compaction by two clients loses no edits', async () => {
   const late = client('carol', 'compact', 'SHOULD-NOT-APPEAR');
   await late.provider.synced;
   await until(() => late.text().length === 520, 10000);
-  const updatesLeft = (await db('alice').ref('projects/p2/docs/compact/updates').get()).numChildren();
+  const updatesLeft = (await db('alice').ref('projects/p2/b/main/docs/compact/updates').get()).numChildren();
   eq(late.text().length, 520, 'late joiner sees every edit');
   eq((late.text().match(/a/g) || []).length, 260, "alice's edits");
   eq((late.text().match(/b/g) || []).length, 260, "bob's edits");

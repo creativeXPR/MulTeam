@@ -1,6 +1,7 @@
 import { watchAuthState, watchCloudConnection, signOut, createCloudProject, deleteCloudProject, upsertDocumentMeta, ensureLiveMembership } from './firebase.js';
 import { fileKeyFor } from './sync.js';
 import { initCollab } from './collab.js';
+import { createLiveProject } from './liveProject.js';
 import { requireAuth, openSignIn } from './authModal.js';
 import { FileDocument, EditorView, setMonacoTheme } from './editor.js';
 import { PresenceBar } from './presence.js';
@@ -235,6 +236,7 @@ watchAuthState((user) => {
   document.getElementById('dashboardGreeting').textContent = user ? `Welcome back, ${user.displayName || user.email}` : 'Welcome — sign in to enable cloud sync';
   renderDashboardCards();
   collab?.onAuth(user);
+  if (user && project?.cloudEnabled && !liveSyncReady) startLiveSync();
 });
 
 document.getElementById('profileSigninBtn').addEventListener('click', () => openSignIn());
@@ -705,6 +707,81 @@ deleteConfirmBtn.addEventListener('click', async () => {
 /* ============================================================
    Editor: opening/closing a project
    ============================================================ */
+/* ============================================================
+   Live project sync (cloud projects): every file with live edits on the
+   current Git branch stays in step on everyone's disk — see liveProject.js.
+   ============================================================ */
+let liveSync = null;        // the running sync for the open cloud project
+let liveSyncReady = null;   // Promise<liveSync | null>
+let liveRole = null;
+let liveDeniedShown = false;
+let branchCheckTimer = null;
+
+const relOf = (filePath) => filePath.slice(rootFolder.length).replace(/^[\\/]+/, '').split('\\').join('/');
+
+function startLiveSync() {
+  if (!project?.cloudEnabled || !currentUser) return Promise.resolve(null);
+  if (liveSyncReady) return liveSyncReady;
+  const p = project;
+  const root = rootFolder;
+  liveDeniedShown = false;
+  liveSyncReady = (async () => {
+    let role = null;
+    try { role = await ensureLiveMembership(p.id, currentUser.uid); } catch (err) { console.warn('[cloud] membership check failed:', err?.message || err); }
+    const st = await window.electronAPI.git.status(root).catch(() => ({ isRepo: false }));
+    if (project !== p) return null;
+    liveRole = role;
+    const api = window.electronAPI;
+    liveSync = createLiveProject({
+      projectId: p.id,
+      root,
+      branch: st.isRepo ? st.branch : null,
+      isGit: !!st.isRepo,
+      uid: currentUser.uid,
+      canEdit: role === 'owner' || role === 'editor',
+      api: {
+        readFile: api.readFile, writeFile: api.writeFile, readDir: api.readDir, createDirectory: api.createDirectory,
+        trashEntry: api.trashEntry, backupFile: api.backupFile, headContent: (r, rel) => api.git.headContent(r, rel)
+      },
+      toast,
+      onDenied: () => {
+        if (liveDeniedShown) return;
+        liveDeniedShown = true;
+        toast("Live editing isn't available for this project right now. You may not be a member, or you're offline. Edits stay local.", 'error');
+      }
+    });
+    return liveSync;
+  })();
+  return liveSyncReady;
+}
+
+function stopLiveSync() {
+  liveSync?.dispose();
+  liveSync = null;
+  liveSyncReady = null;
+  liveRole = null;
+}
+
+// Git moved HEAD (commit, pull, checkout…). A different branch = a different
+// live session: reopen the editors against it (without saving — the files on
+// disk are now the other branch's).
+function scheduleBranchCheck() {
+  clearTimeout(branchCheckTimer);
+  branchCheckTimer = setTimeout(async () => {
+    if (!liveSync || !rootFolder) return;
+    const st = await window.electronAPI.git.status(rootFolder).catch(() => null);
+    if (!st?.isRepo || !liveSync || st.branch === liveSync.branch) return;
+    const reopen = orderedGroups().flatMap((g) => g.tabs);
+    const active = activeTabPath;
+    closeAllEditors({ save: false });
+    stopLiveSync();
+    await startLiveSync();
+    for (const path of reopen) if (!samePath(path, active)) await openFile(path).catch(() => {});
+    if (active) openFile(active).catch(() => {});
+    toast(`Switched to branch ${st.branch}. You're now in its live session.`);
+  }, 700);
+}
+
 async function openProjectView(p) {
   if (project && project.id === p.id) { go('editor'); return; }
 
@@ -735,6 +812,7 @@ async function openProjectView(p) {
   scm.refresh();
   document.getElementById('explorerActs').hidden = false;
   window.electronAPI.watchPath(rootFolder).catch(() => { /* explorer still works, just no auto-refresh */ });
+  if (p.cloudEnabled && currentUser) startLiveSync();
 }
 
 function closeProjectView() {
@@ -744,6 +822,7 @@ function closeProjectView() {
   selectedDir = null;
   document.getElementById('explorerActs').hidden = true;
   closeAllEditors({ save: true });
+  stopLiveSync();
   project = null;
   rootFolder = null;
   projectOpenedAt = null;
@@ -1121,19 +1200,17 @@ async function openDoc(filePath) {
   const rec = { doc: null, saveTimer: null, sub: null };
   rec.opening = (async () => {
     const content = await window.electronAPI.readFile(filePath);
-    const rel = filePath.slice(rootFolder.length).replace(/^[\\/]/, '');
-    const cloud = !!project?.cloudEnabled;
+    const rel = relOf(filePath);
+    const engine = project?.cloudEnabled ? await startLiveSync() : null;
+    // ignored files (.env, build output…) and big/binary files stay local
+    const cloud = !!engine && engine.isShared(rel) && typeof content === 'string' && content.length <= 512 * 1024;
     const fileKey = fileKeyFor(rel);
     const docId = `${project.id}__${fileKey}`;
-    let role = null;
-    if (cloud) {
-      try { role = await ensureLiveMembership(project.id, currentUser.uid); } catch (err) { console.warn('[cloud] membership check failed:', err?.message || err); }
-    }
+    const role = cloud ? liveRole : null;
     const doc = new FileDocument(filePath, {
-      live: cloud ? { projectId: project.id, fileKey } : null,
+      live: cloud ? { acquire: (seed) => engine.acquire(rel, seed), release: () => engine.release(rel) } : null,
       currentUser,
-      collaborative: cloud,
-      onDenied: () => toast(`Live editing isn't available for ${rel}. You may not be a member of this project, or you're offline. Edits stay local.`, 'error')
+      collaborative: cloud
     }).init(content);
     doc.readOnly = role === 'viewer';
     if (cloud) {
@@ -1148,7 +1225,7 @@ async function openDoc(filePath) {
       clearTimeout(rec.saveTimer);
       rec.saveTimer = setTimeout(() => saveActiveFile(doc.filePath), 800);
     });
-    if (project?.cloudEnabled) {
+    if (cloud) {
       upsertDocumentMeta(docId, { projectId: project.id, path: rel, language: doc.model.getLanguageId(), userId: currentUser.uid }).catch(() => {});
     }
     return doc;
@@ -1161,6 +1238,7 @@ const shownAnywhere = (p) => [...groups.values()].some((g) => g.activePath && sa
 
 function writeDoc(doc) {
   const text = doc.getValue();
+  if (rootFolder && liveSync) liveSync.noteWritten(relOf(doc.filePath), text); // not an outside change
   return window.electronAPI.writeFile(doc.filePath, text).then(() => { doc.diskText = text; });
 }
 
@@ -2202,9 +2280,11 @@ document.getElementById('panel-project-list').addEventListener('keydown', (e) =>
 let externalChangeTimer = null;
 let tabsCheckTimer = null;
 const diskTimers = new Map();
-window.electronAPI.onFileExternalChange(({ path: watched, eventType, filename }) => {
+window.electronAPI.onFileExternalChange(({ path: watched, eventType, filename, git }) => {
   if (!rootFolder || !samePath(watched, rootFolder)) return;
   scm.refreshSoon();
+  liveSync?.onDiskEvent({ filename, git });
+  if (git) { if (liveSync) scheduleBranchCheck(); return; }
   const changed = filename ? joinPath(rootFolder, String(filename).replace(/\\/g, '/')) : null;
   if (changed && documents.has(pathKey(changed))) {
     const key = pathKey(changed);

@@ -55,7 +55,7 @@ const dan = await session({ id: 'dan1', email: 'dan@team.dev', name: 'Dan', veri
 
 const P = 'proj-' + Date.now();
 const pdoc = (s) => doc(s.fs, 'projects', P);
-const live = (s) => `projects/${P}/docs/main~2Ejs`;
+const live = (s) => `projects/${P}/b/main/docs/main~2Ejs`;
 const pushLive = (s) => push(ref(s.db, `${live(s)}/updates`), { state: 'AAA=', origin: 1 });
 const project = () => ({
   name: 'Team App', ownerId: owner.uid, repoUrl: '',

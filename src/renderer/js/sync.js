@@ -6,9 +6,10 @@
 // same transport for awareness (presence/cursors).
 //
 // Layout (see firebase/database.rules.json — members of the project only):
-//   projects/{projectId}/docs/{fileKey}/snapshot      merged Yjs state
-//   projects/{projectId}/docs/{fileKey}/updates/{id}  updates since the snapshot
-//   projects/{projectId}/docs/{fileKey}/awareness/{clientId}
+//   projects/{projectId}/b/{branchKey}/docs/{fileKey}/snapshot      merged Yjs state
+//   projects/{projectId}/b/{branchKey}/docs/{fileKey}/updates/{id}  updates since the snapshot
+//   projects/{projectId}/b/{branchKey}/docs/{fileKey}/awareness/{clientId}
+// (each Git branch has its own live session; projects without Git use one)
 //
 // Safety:
 // - Seeding: a file's live doc is created from disk exactly once, by a
@@ -49,13 +50,13 @@ export function fileKeyFor(relativePath) {
 
 export class FirebaseProvider {
   // seedText: the file's text on disk, used only if nobody has a live doc yet
-  constructor({ projectId, fileKey, seedText = '' }, ydoc, { onDenied } = {}) {
+  constructor({ projectId, branchKey, fileKey, seedText = '' }, ydoc, { onDenied, db = rtdb } = {}) {
     this.doc = ydoc;
     this.awareness = new Awareness(ydoc);
     this.connected = false;
     this.onDenied = onDenied;
 
-    this.docRef = ref(rtdb, `projects/${projectId}/docs/${fileKey}`);
+    this.docRef = ref(db, `projects/${projectId}/b/${branchKey}/docs/${fileKey}`);
     this.updatesRef = child(this.docRef, 'updates');
     this.snapshotRef = child(this.docRef, 'snapshot');
     this.awarenessRef = child(this.docRef, 'awareness');

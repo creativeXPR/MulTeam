@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createFile: (filePath) => ipcRenderer.invoke(IPC.CREATE_FILE, filePath),
   createDirectory: (dirPath) => ipcRenderer.invoke(IPC.CREATE_DIRECTORY, dirPath),
   deleteEntry: (entryPath) => ipcRenderer.invoke(IPC.DELETE_ENTRY, entryPath),
+  trashEntry: (entryPath) => ipcRenderer.invoke(IPC.TRASH_ENTRY, entryPath),
+  backupFile: (projectId, relPath, content) => ipcRenderer.invoke(IPC.BACKUP_FILE, projectId, relPath, content),
   renameEntry: (oldPath, newPath) => ipcRenderer.invoke(IPC.RENAME_ENTRY, oldPath, newPath),
   duplicateEntry: (entryPath) => ipcRenderer.invoke(IPC.DUPLICATE_ENTRY, entryPath),
   watchPath: (watchPath) => ipcRenderer.invoke(IPC.WATCH_PATH, watchPath),
@@ -53,6 +55,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Source control (simple-git in the main process)
   git: {
     status: (root) => ipcRenderer.invoke(IPC.GIT_STATUS, root),
+    headContent: (root, relPath) => ipcRenderer.invoke(IPC.GIT_HEAD_CONTENT, root, relPath),
     init: (root) => ipcRenderer.invoke(IPC.GIT_INIT, root),
     stage: (root, paths) => ipcRenderer.invoke(IPC.GIT_STAGE, root, paths),
     unstage: (root, paths) => ipcRenderer.invoke(IPC.GIT_UNSTAGE, root, paths),

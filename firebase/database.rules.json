@@ -17,26 +17,39 @@
       "$projectId": {
         ".write": "auth != null && !newData.exists() && root.child('projectMembers').child($projectId).child(auth.uid).val() === 'owner'",
 
-        "docs": {
-          "$fileKey": {
+        "b": {
+          "$branch": {
             ".read": "auth != null && root.child('projectMembers').child($projectId).child(auth.uid).exists()",
 
-            "updates": {
-              "$pushId": {
-                ".write": "auth != null && (root.child('projectMembers').child($projectId).child(auth.uid).val() === 'owner' || root.child('projectMembers').child($projectId).child(auth.uid).val() === 'editor') && (!data.exists() || !newData.exists())",
-                ".validate": "newData.hasChildren(['state', 'origin']) && newData.child('state').isString() && newData.child('state').val().length <= 1000000 && newData.child('origin').isNumber()"
+            "docs": {
+              "$fileKey": {
+                ".write": "auth != null && !newData.exists() && (root.child('projectMembers').child($projectId).child(auth.uid).val() === 'owner' || root.child('projectMembers').child($projectId).child(auth.uid).val() === 'editor')",
+
+                "updates": {
+                  "$pushId": {
+                    ".write": "auth != null && (root.child('projectMembers').child($projectId).child(auth.uid).val() === 'owner' || root.child('projectMembers').child($projectId).child(auth.uid).val() === 'editor') && (!data.exists() || !newData.exists())",
+                    ".validate": "newData.hasChildren(['state', 'origin']) && newData.child('state').isString() && newData.child('state').val().length <= 1000000 && newData.child('origin').isNumber()"
+                  }
+                },
+
+                "snapshot": {
+                  ".write": "auth != null && (root.child('projectMembers').child($projectId).child(auth.uid).val() === 'owner' || root.child('projectMembers').child($projectId).child(auth.uid).val() === 'editor')",
+                  ".validate": "newData.hasChildren(['state', 'updatedAt']) && newData.child('state').isString()"
+                },
+
+                "awareness": {
+                  "$clientId": {
+                    ".write": "auth != null && root.child('projectMembers').child($projectId).child(auth.uid).exists()",
+                    ".validate": "newData.isString() && newData.val().length <= 20000"
+                  }
+                }
               }
             },
 
-            "snapshot": {
-              ".write": "auth != null && (root.child('projectMembers').child($projectId).child(auth.uid).val() === 'owner' || root.child('projectMembers').child($projectId).child(auth.uid).val() === 'editor')",
-              ".validate": "newData.hasChildren(['state', 'updatedAt']) && newData.child('state').isString()"
-            },
-
-            "awareness": {
-              "$clientId": {
-                ".write": "auth != null && root.child('projectMembers').child($projectId).child(auth.uid).exists()",
-                ".validate": "newData.isString() && newData.val().length <= 20000"
+            "files": {
+              "$fileKey": {
+                ".write": "auth != null && (root.child('projectMembers').child($projectId).child(auth.uid).val() === 'owner' || root.child('projectMembers').child($projectId).child(auth.uid).val() === 'editor')",
+                ".validate": "newData.hasChildren(['path', 'kind', 'state', 'by', 'at']) && newData.child('path').isString() && newData.child('path').val().length <= 1000 && (newData.child('kind').val() === 'file' || newData.child('kind').val() === 'dir') && (newData.child('state').val() === 'live' || newData.child('state').val() === 'deleted') && newData.child('by').val() === auth.uid && newData.child('at').isNumber()"
               }
             }
           }

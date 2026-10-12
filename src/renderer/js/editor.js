@@ -11,7 +11,6 @@ import { builtinSemanticRules } from './semanticTokens.js';
 import * as monaco from 'monaco-editor';
 import * as Y from 'yjs';
 import { MonacoBinding } from 'y-monaco';
-import { FirebaseProvider } from './sync.js';
 import { monacoOptionsFromSettings } from './settings.js';
 
 let themesDefined = false;
@@ -146,11 +145,12 @@ export const MarkerSeverity = monaco.MarkerSeverity;
 const LIVE_TIMEOUT_MS = 6000;
 
 export class FileDocument {
-  // live: { projectId, fileKey } for cloud projects; onDenied(err) when the
-  // live document can't be reached (not a member, rules, offline…)
-  constructor(filePath, { live = null, currentUser, collaborative = false, onDenied } = {}) {
-    Object.assign(this, { filePath, live, currentUser, collaborative, onDenied });
-    this.ydoc = collaborative ? new Y.Doc() : null;
+  // live: for cloud projects, { acquire(seedText) → { ydoc, provider }, release() }
+  // from the project's live sync (liveProject.js) — the same live document is
+  // shared with background sync, so it outlives this editor if needed.
+  constructor(filePath, { live = null, currentUser, collaborative = false } = {}) {
+    Object.assign(this, { filePath, live, currentUser, collaborative });
+    this.ydoc = null;
     this.provider = null;
     this.binding = null;
     this.model = null;
@@ -174,7 +174,9 @@ export class FileDocument {
 
     // The provider seeds the live doc from disk only if none exists yet
     // (once, by transaction); otherwise the shared text arrives from Firebase.
-    this.provider = new FirebaseProvider({ ...this.live, seedText: initialContent }, this.ydoc, { onDenied: this.onDenied });
+    const shared = this.live.acquire(initialContent);
+    this.ydoc = shared.ydoc;
+    this.provider = shared.provider;
     const timeout = new Promise((r) => setTimeout(() => r(false), LIVE_TIMEOUT_MS));
     this.ready = Promise.race([this.provider.firstState, this.provider.noLiveDocYet, timeout]).then((live) => {
       if (live) this._bind();
@@ -182,7 +184,7 @@ export class FileDocument {
         // Not live yet (viewer on a never-opened file, or the session is
         // slow/offline). Bind later only if nothing was typed meanwhile —
         // binding replaces the editor text with the shared text.
-        this.provider.firstState.then((ok) => { if (ok && this.model && !this.model.isDisposed() && this.model.getValue() === initialContent) this._bind(); });
+        this.provider.firstState.then((ok) => { if (ok && this.provider && this.model && !this.model.isDisposed() && this.model.getValue() === initialContent) this._bind(); });
       }
       return live;
     });
@@ -227,9 +229,15 @@ export class FileDocument {
   destroy() {
     if (this.provider && this.binding) this.provider.awareness.off('change', this.binding._rerenderDecorations);
     if (this.binding) this.binding.destroy();
-    if (this.provider) this.provider.destroy();
+    if (this.provider) {
+      // the live doc may stay open for background sync: drop my cursor first
+      this.provider.awareness.setLocalStateField('selection', null);
+      this.live.release();
+    }
+    this.binding = null;
+    this.provider = null;
+    this.ydoc = null;
     if (this.model && !this.model.isDisposed()) this.model.dispose();
-    if (this.ydoc) this.ydoc.destroy();
     this.editors.clear();
   }
 }
