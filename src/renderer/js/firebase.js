@@ -334,8 +334,9 @@ export async function createInviteLink(projectId, ownerId, { role = 'editor', ex
 }
 
 export function watchInviteLinks(projectId, ownerId, cb) {
-  return onSnapshot(query(collection(firestore, 'inviteLinks'), where('ownerId', '==', ownerId), where('projectId', '==', projectId)),
-    (snap) => cb(snap.docs.map((d) => ({ code: d.id, ...d.data() })).filter((l) => !l.revoked)), () => cb([]));
+  // pending = shown before the server has saved it (not usable yet)
+  return onSnapshot(query(collection(firestore, 'inviteLinks'), where('ownerId', '==', ownerId), where('projectId', '==', projectId)), { includeMetadataChanges: true },
+    (snap) => cb(snap.docs.map((d) => ({ code: d.id, ...d.data(), pending: d.metadata.hasPendingWrites })).filter((l) => !l.revoked)), () => cb([]));
 }
 
 export const revokeInviteLink = (code) => updateDoc(doc(firestore, 'inviteLinks', code), { revoked: true });

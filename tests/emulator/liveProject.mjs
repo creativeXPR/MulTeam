@@ -37,8 +37,9 @@ const until = async (fn, ms = 10000) => { const t = Date.now(); while (Date.now(
 const eq = (a, b, what) => { if (a !== b) throw new Error(`${what}: expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`); };
 
 // A machine: its own folder, fake trash, git HEAD contents, and an engine.
-function machine(uid, { branch = 'main', canEdit = true, head = {} } = {}) {
+function machine(uid, { branch = 'main', canEdit = true, head = {}, isGit = true, project = P, seedFiles = {} } = {}) {
   const dir = mkdtempSync(path.join(os.tmpdir(), `mt-${uid}-`));
+  for (const [rel, text] of Object.entries(seedFiles)) { mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); writeFileSync(path.join(dir, rel), text); }
   const trash = mkdtempSync(path.join(os.tmpdir(), `mt-${uid}-trash-`));
   const backups = [];
   const toasts = [];
@@ -49,10 +50,16 @@ function machine(uid, { branch = 'main', canEdit = true, head = {} } = {}) {
     createDirectory: (p) => fsp.mkdir(p, { recursive: true }),
     trashEntry: async (p) => { if (!existsSync(p)) return false; await fsp.rename(p, path.join(trash, path.basename(p) + '-' + Date.now())); return true; },
     backupFile: async (_pid, rel, content) => { backups.push({ rel, content }); return `backup/${rel}`; },
-    headContent: async (_root, rel) => (rel in head ? head[rel] : null)
+    headContent: async (_root, rel) => (rel in head ? head[rel] : null),
+    listFiles: async (r) => {
+      const files = [];
+      const walk = async (d) => { for (const e of await fsp.readdir(d, { withFileTypes: true })) { const full = path.join(d, e.name); if (e.isDirectory()) { if (!['node_modules', '.git'].includes(e.name)) await walk(full); } else files.push(path.relative(r, full)); } };
+      await walk(r);
+      return { files, truncated: false };
+    }
   };
   const db = env.authenticatedContext(uid).database()._delegate;
-  const start = (b = branch) => createLiveProject({ projectId: P, root: dir, branch: b, isGit: true, uid, canEdit, api, toast: (m) => toasts.push(m), db });
+  const start = (b = branch) => createLiveProject({ projectId: project, root: dir, branch: b, isGit, uid, canEdit, api, toast: (m) => toasts.push(m), db });
   const m = { uid, dir, backups, toasts, head, engine: start(), start };
   m.file = (rel) => path.join(dir, ...rel.split('/'));
   m.read = (rel) => (existsSync(m.file(rel)) ? readFileSync(m.file(rel), 'utf8') : null);
@@ -163,6 +170,79 @@ await check('branches are separate live sessions', async () => {
 });
 
 for (const m of [alice, bob, vic]) m.engine.dispose();
+
+// ================= projects without Git (stage 2.2) =================
+const NP = P + '-nogit';
+await env.withSecurityRulesDisabled((ctx) => ctx.database().ref(`projectMembers/${NP}`).set({ alice: 'owner', bob: 'editor', vic: 'viewer' }));
+const ng = { isGit: false, project: NP };
+const owner = machine('alice', { ...ng, seedFiles: { 'index.html': '<h1>hi</h1>\n', 'css/site.css': 'body{}\n', 'js/app.js': 'go();\n', '.env': 'KEY=1\n', 'node_modules/x.js': 'x\n' } });
+
+await check('no Git: the owner shares the whole project when it opens', async () => {
+  await owner.engine.treeShared;
+  if (!owner.toasts.some((t) => /Shared 3 files/.test(t))) throw new Error('toasts: ' + JSON.stringify(owner.toasts));
+});
+const joiner = machine('bob', { ...ng });
+await check('no Git: a joiner with an empty folder receives every file', async () => {
+  eq(await until(() => joiner.read('index.html') === '<h1>hi</h1>\n' && joiner.read('css/site.css') === 'body{}\n' && joiner.read('js/app.js') === 'go();\n'), true, 'received');
+  eq(joiner.read('.env'), null, '.env leaked');
+  eq(joiner.read('node_modules/x.js'), null, 'node_modules leaked');
+});
+await check('no Git: a later edit and a new file keep syncing', async () => {
+  await joiner.write('js/app.js', 'go(); stop();\n');
+  await joiner.write('README.txt', 'read me\n');
+  eq(await until(() => owner.read('js/app.js') === 'go(); stop();\n' && owner.read('README.txt') === 'read me\n'), true, 'synced');
+});
+await check('no Git: a deleted file is not brought back by someone who still has it', async () => {
+  const late = machine('bob', { ...ng, seedFiles: { 'README.txt': 'read me\n' } }); // offline copy
+  late.engine.dispose();
+  await owner.del('README.txt');
+  await until(() => joiner.read('README.txt') === null);
+  late.engine = late.start();
+  await late.engine.treeShared;
+  await wait(1500);
+  eq(owner.read('README.txt'), null, 'resurrected on owner');
+  eq(late.read('README.txt'), null, 'still on the late machine');
+  late.engine.dispose();
+});
+await check('no Git: a stale copy is backed up and replaced; extra local files are shared', async () => {
+  const stale = machine('bob', { ...ng, seedFiles: { 'index.html': '<h1>OLD</h1>\n', 'notes/mine.md': '# mine\n' } });
+  await stale.engine.treeShared;
+  eq(await until(() => stale.read('index.html') === '<h1>hi</h1>\n'), true, 'replaced with live');
+  eq(stale.backups.some((b) => b.rel === 'index.html' && b.content === '<h1>OLD</h1>\n'), true, 'backup made');
+  eq(await until(() => owner.read('notes/mine.md') === '# mine\n'), true, 'extra file shared');
+  stale.engine.dispose();
+});
+await check('no Git: a viewer receives but never uploads its files', async () => {
+  const v = machine('vic', { ...ng, seedFiles: { 'viewer-only.txt': 'nope\n' } });
+  eq(await until(() => v.read('index.html') === '<h1>hi</h1>\n'), true, 'viewer received');
+  await wait(1500);
+  eq(owner.read('viewer-only.txt'), null, 'viewer file uploaded');
+  v.engine.dispose();
+});
+await check('no Git: a project over the file limit asks for Git instead', async () => {
+  const BP = P + '-big';
+  await env.withSecurityRulesDisabled((ctx) => ctx.database().ref(`projectMembers/${BP}`).set({ alice: 'owner' }));
+  const seed = Object.fromEntries(Array.from({ length: 405 }, (_, i) => [`f/${i}.txt`, `${i}\n`]));
+  const big = machine('alice', { isGit: false, project: BP, seedFiles: seed });
+  await big.engine.treeShared;
+  eq(big.toasts.some((t) => /too many to sync without Git/.test(t)), true, 'limit message');
+  const idx = (await env.authenticatedContext('alice').database().ref(`projects/${BP}/b/_project/files`).get()).exists();
+  eq(idx, false, 'nothing shared');
+  big.engine.dispose();
+});
+await check('stress: 5 rounds of simultaneous disk edits keep every edit', async () => {
+  await owner.write('race.txt', 'base\n');
+  await until(() => joiner.read('race.txt') === 'base\n');
+  for (let i = 0; i < 5; i++) {
+    const a = owner.read('race.txt');
+    const b = joiner.read('race.txt');
+    await Promise.all([owner.write('race.txt', `A${i}\n` + a), joiner.write('race.txt', b + `B${i}\n`)]);
+    await wait(300);
+  }
+  const ok = await until(() => owner.read('race.txt') === joiner.read('race.txt') && [0, 1, 2, 3, 4].every((i) => (owner.read('race.txt') || '').includes(`A${i}\n`) && (owner.read('race.txt') || '').includes(`B${i}\n`)), 15000);
+  eq(ok, true, `converged with all edits (owner=${JSON.stringify(owner.read('race.txt'))}, joiner=${JSON.stringify(joiner.read('race.txt'))})`);
+});
+for (const m of [owner, joiner]) m.engine.dispose();
 await env.cleanup();
 const failed = results.filter((r) => r[0] === 'FAIL');
 for (const r of results) console.log(r[0].padEnd(5), r[1], r[2] ? `\n      → ${r[2]}` : '');

@@ -75,9 +75,9 @@ app.whenReady().then(async () => {
     await until(() => js("return document.querySelectorAll('#share-invites .share__item').length === 1"));
     out('pending invites:', await js("return [...document.querySelectorAll('#share-invites .share__who')].map(e => e.textContent.trim().replace(/\\s+/g, ' ')).join(' | ')"));
     await js("document.getElementById('share-link-role').value = 'viewer'; document.getElementById('share-link-create').click()");
-    await until(() => js("return document.querySelectorAll('#share-links .share__code').length === 1"));
-    const code = await js("return document.querySelector('#share-links .share__code').textContent");
-    out('link code:', code, '/', await js("return document.querySelector('#share-links .share__who').textContent.trim()"));
+    await until(() => js("return document.querySelectorAll('#share-links .share__item:not(.is-pending) .share__code').length === 1"));
+    const code = await js("return document.querySelector('#share-links .share__item:not(.is-pending) .share__code').textContent");
+    out('link code:', code, '/', await js("return document.querySelector('#share-links .share__item:not(.is-pending) .share__who').textContent.trim()"));
 
     // bob accepts; carol joins with the code
     const bob = await user('bob', 'bob@team.dev', 'Bob Builder');

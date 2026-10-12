@@ -741,7 +741,8 @@ function startLiveSync() {
       canEdit: role === 'owner' || role === 'editor',
       api: {
         readFile: api.readFile, writeFile: api.writeFile, readDir: api.readDir, createDirectory: api.createDirectory,
-        trashEntry: api.trashEntry, backupFile: api.backupFile, headContent: (r, rel) => api.git.headContent(r, rel)
+        trashEntry: api.trashEntry, backupFile: api.backupFile, headContent: (r, rel) => api.git.headContent(r, rel),
+        listFiles: api.listFiles
       },
       toast,
       onDenied: () => {

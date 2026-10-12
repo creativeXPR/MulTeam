@@ -1070,3 +1070,4 @@ button.primary:disabled:has(.btn-spinner) { background: var(--violet-500); }
 .toggle-field.sm input:checked + .toggle-track .toggle-thumb { transform: translateX(12px); }
 .toggle-field.sm .toggle-label { font-size: 12px; font-weight: 400; color: var(--text-2); }
 .toggle-field input:focus-visible + .toggle-track { outline: 2px solid var(--violet-400); outline-offset: 2px; }
+.share__item.is-pending .share__code { opacity: .55; }

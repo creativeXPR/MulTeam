@@ -47,6 +47,8 @@ app.whenReady().then(async () => {
     win.webContents.on('console-message', (e, level, msg) => { if (level >= 3 && !/Could not reach Cloud Firestore|PERMISSION_DENIED|permission_denied/.test(msg)) errs.push(String(msg).slice(0, 300)); });
     await wait(4000);
     const js = (s) => win.webContents.executeJavaScript('(async () => { ' + s + ' })()').catch((e) => 'TESTERR ' + e.message);
+    // leftovers from an earlier interrupted run would confuse the test
+    await js("for (const p of await window.electronAPI.listProjects()) if (p.name === 'Team' || p.name === 'Plain') await window.electronAPI.deleteProjectLocal(p.id)");
     await js("localStorage.setItem('multeam:emulators', '1'); location.reload()"); await wait(4500);
     await js("await window.__multeamTest.signIn({ uid: 'olu', email: 'olu@team.dev', name: 'Olu Owner' })"); await wait(1000);
     const pid = await js('return (await window.electronAPI.createProject({ name: "Team", folderPath: ' + JSON.stringify(proj) + ', cloudEnabled: false })).id');
@@ -61,8 +63,8 @@ app.whenReady().then(async () => {
     await menu('Share…');
     await until(() => js("return document.getElementById('share-title').textContent.includes('Team')"));
     await js("document.getElementById('share-link-create').click()");
-    await until(() => js("return !!document.querySelector('#share-links .share__code')"));
-    const code = await js("return document.querySelector('#share-links .share__code').textContent");
+    await until(() => js("return !!document.querySelector('#share-links .share__item:not(.is-pending) .share__code')"));
+    const code = await js("return document.querySelector('#share-links .share__item:not(.is-pending) .share__code').textContent");
     await js("document.getElementById('share-done').click()");
 
     // teammate joins (editor link) and runs the engine on their own folder
@@ -101,7 +103,9 @@ app.whenReady().then(async () => {
 
     // mate edits app.js → app editor updates live
     mateWrite('app.js', (mateRead('app.js') || '') + 'const fromMate = true;\n');
-    out('mate edit → app editor:', await until(() => js("return document.querySelector('.view-lines').textContent.includes('fromMate')")));
+    const seen = await until(() => js("return document.querySelector('.view-lines').textContent.includes('fromMate')"));
+    out('mate edit → app editor:', seen);
+    if (!seen) out('  debug: mate disk=', JSON.stringify(mateRead('app.js')), ' mate state=', JSON.stringify(mateEngine._state().docs), ' app editor=', JSON.stringify(await js("return document.querySelector('.view-lines').textContent")), ' tabs=', await js("return [...document.querySelectorAll('.egroup .tab')].map(t => t.dataset.path.split(/[\\\\/]/).pop() + (t.classList.contains('active') ? '*' : '')).join(',') + ' editors=' + document.querySelectorAll('.monaco-editor').length + ' viewlines=' + document.querySelectorAll('.view-lines').length + ' emptyHint=' + (document.querySelector('.egroup__editor')?.dataset.empty || '') + ' editorChildren=' + document.querySelector('.egroup__editor')?.children.length"), ' toasts=', await js("return [...document.querySelectorAll('.toast')].map(t => t.textContent).join(' | ')"), ' app disk=', JSON.stringify(fs.readFileSync(path.join(proj, 'app.js'), 'utf8')));
 
     // a file created outside the editor (like the terminal) → mate
     fs.writeFileSync(path.join(proj, 'terminal.txt'), 'made in terminal\n');
@@ -115,9 +119,50 @@ app.whenReady().then(async () => {
     out('feature-branch file stays off main (mate):', mateRead('feature-only.txt') === null);
     out('editor reopened:', await js("return document.querySelectorAll('.egroup .tab').length"));
 
-    out('errors:', errs.join('\n  ') || 'none');
     mateEngine.dispose();
-    await js("for (const p of await window.electronAPI.listProjects()) if (p.name === 'Team') await window.electronAPI.deleteProjectLocal(p.id); localStorage.removeItem('multeam:emulators')");
+
+    // ---- phase 2: a cloud project WITHOUT Git (stage 2.2) ----
+    const plain = path.join(TMPF, 'plain');
+    const plainMate = path.join(TMPF, 'plain-mate');
+    fs.mkdirSync(path.join(plain, 'pages'), { recursive: true });
+    fs.mkdirSync(plainMate, { recursive: true });
+    fs.writeFileSync(path.join(plain, 'index.html'), '<h1>home</h1>\n');
+    fs.writeFileSync(path.join(plain, 'pages', 'about.html'), '<p>about</p>\n');
+    fs.writeFileSync(path.join(plain, '.env'), 'SECRET=1\n');
+    const pid2 = await js('return (await window.electronAPI.createProject({ name: "Plain", folderPath: ' + JSON.stringify(plain) + ', cloudEnabled: false })).id');
+    await js("go('dashboard'); await refreshProjects?.()").catch(() => {});
+    await js('location.reload()'); await wait(4500);
+    const menu2 = async (label) => {
+      await js("document.querySelector('#projects [data-project=\"" + pid2 + "\"]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 400, clientY: 330 }))"); await wait(300);
+      await js("[...document.querySelectorAll('.context-menu-item')].find(b => b.offsetParent && b.textContent.startsWith(" + JSON.stringify(label) + ")).click()");
+    };
+    await menu2('Edit…'); await wait(300);
+    await js("document.getElementById('project-cloud-toggle').checked = true; document.getElementById('project-submit').click()");
+    const editClosed = await until(() => js("return document.getElementById('project-modal').hidden"), 40000); await wait(500);
+    await menu2('Share…');
+    await until(() => js("return document.getElementById('share-title').textContent.includes('Plain')"));
+    await js("document.getElementById('share-link-create').click()");
+    const linkShown = await until(() => js("return !!document.querySelector('#share-links .share__item:not(.is-pending) .share__code')"));
+    if (!linkShown) out('  debug: no link; share sub=', await js("return document.getElementById('share-sub').textContent"), ' toasts=', await js("return [...document.querySelectorAll('.toast')].map(t => t.textContent).join(' | ')"), ' projects=', await js("return JSON.stringify((await window.electronAPI.listProjects()).map(p => [p.name, p.cloudEnabled]))"));
+    await httpsCallable(fns, 'redeemCode')({ code: await js("return document.querySelector('#share-links .share__item:not(.is-pending) .share__code').textContent") });
+    await js("document.getElementById('share-done').click()");
+    // opening it shares the whole folder (no Git)
+    await js("document.querySelector('[data-project-row=\"" + pid2 + "\"]').click()"); await wait(500);
+    out('no-git: share toast:', await until(() => js("return [...document.querySelectorAll('.toast')].some(t => /Shared 2 files/.test(t.textContent))"), 20000));
+    const plainApi = { ...mateApi, listFiles: async (r) => ({ files: [], truncated: false }) };
+    const plainEngine = createLiveProject({ projectId: pid2, root: plainMate, branch: null, isGit: false, uid: auth.currentUser.uid, canEdit: true, api: plainApi, db });
+    const pRead = (rel) => (fs.existsSync(path.join(plainMate, rel)) ? fs.readFileSync(path.join(plainMate, rel), 'utf8') : null);
+    out('no-git: empty folder received everything:', await until(() => pRead('index.html') === '<h1>home</h1>\n' && pRead('pages/about.html') === '<p>about</p>\n'));
+    out('no-git: .env stayed local:', pRead('.env') === null);
+    fs.writeFileSync(path.join(plainMate, 'contact.html'), '<p>contact</p>\n');
+    plainEngine.onDiskEvent({ filename: 'contact.html' });
+    out('no-git: teammate file → app disk:', await until(() => fs.existsSync(path.join(plain, 'contact.html'))));
+    await wait(800);
+    out('no-git: explorer shows it:', await js("return !!document.querySelector('#file-tree .file-tree-node[data-name=\"contact.html\"]')"));
+    plainEngine.dispose();
+
+    out('errors:', errs.join('\n  ') || 'none');
+    await js("for (const p of await window.electronAPI.listProjects()) if (p.name === 'Team' || p.name === 'Plain') await window.electronAPI.deleteProjectLocal(p.id); localStorage.removeItem('multeam:emulators')");
   } catch (e) { out('HARNESS', e.stack); }
   app.quit();
 });

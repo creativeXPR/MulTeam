@@ -119,7 +119,11 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
       shareModal.hidden = false;
       $('share-title').textContent = 'Share';
       $('share-sub').textContent = 'Loading…';
-      $('share-members').innerHTML = '';
+      // nothing from the previously shared project may linger
+      for (const id of ['share-members', 'share-invites', 'share-links', 'share-requests']) $(id).innerHTML = '';
+      $('share-requests-sec').hidden = true;
+      $('share-email').value = '';
+      share.invites = [];
       share.unsubs.push(watchCloudProject(projectId, (p) => {
         if (!p) {
           $('share-sub').textContent = "This project isn't in the cloud, or you no longer have access to it.";
@@ -373,11 +377,11 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
   function renderLinks(list) {
     list.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
     $('share-links').innerHTML = list.length ? list.map((l) => `
-      <div class="share__item">
+      <div class="share__item${l.pending ? ' is-pending' : ''}">
         <span class="share__code">${esc(formatCode(l.code))}</span>
-        <span class="share__who"><small>${ROLE_LABEL[l.role]}${l.requiresApproval ? ' · needs approval' : ''} · ${expiryText(l)}</small></span>
-        <button type="button" class="secondary sm" data-copy-link="${esc(l.code)}">Copy link</button>
-        <button type="button" class="secondary sm" data-copy-code="${esc(l.code)}">Copy code</button>
+        <span class="share__who"><small>${l.pending ? 'creating…' : `${ROLE_LABEL[l.role]}${l.requiresApproval ? ' · needs approval' : ''} · ${expiryText(l)}`}</small></span>
+        <button type="button" class="secondary sm" data-copy-link="${esc(l.code)}" ${l.pending ? 'disabled' : ''}>Copy link</button>
+        <button type="button" class="secondary sm" data-copy-code="${esc(l.code)}" ${l.pending ? 'disabled' : ''}>Copy code</button>
         <button type="button" class="ibtn" data-revoke-link="${esc(l.code)}" title="Turn off this link" aria-label="Turn off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></svg></button>
       </div>`).join('') : '<p class="field-hint">No active links. Anyone with a link can join until it expires or you turn it off.</p>';
   }
