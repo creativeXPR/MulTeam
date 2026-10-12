@@ -118,6 +118,16 @@ function enhance(select) {
   new MutationObserver(refresh).observe(select, { childList: true, subtree: true, attributes: true });
   select.addEventListener('change', refresh);
   select.refreshCustom = refresh;
+  // Code that sets .value / .selectedIndex directly fires no event, so wrap
+  // both on this element: the visible label then always matches the value.
+  for (const prop of ['value', 'selectedIndex']) {
+    const native = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, prop);
+    Object.defineProperty(select, prop, {
+      configurable: true,
+      get() { return native.get.call(this); },
+      set(v) { native.set.call(this, v); refresh(); }
+    });
+  }
   refresh();
 }
 

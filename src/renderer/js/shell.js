@@ -1295,7 +1295,6 @@ async function applyTheme(t, { user = false } = {}) {
     if (res?.switched) {
       toast(`Switched to ${res.switched}`);
       setTheme(t); // remember the preference too
-      document.querySelectorAll('[data-theme-set]').forEach((b) => b.classList.toggle('is-on', b.dataset.themeSet === t));
       return;
     }
     if (res?.same) return;
@@ -1311,8 +1310,16 @@ async function applyTheme(t, { user = false } = {}) {
   }
   setTheme(t);
   setMonacoTheme(getEffectiveTheme());
-  document.querySelectorAll('[data-theme-set]').forEach((b) => b.classList.toggle('is-on', b.dataset.themeSet === t));
+  paintThemeButtons();
 }
+
+// The Light/Dark buttons always reflect what's on screen: an active color
+// theme's mode (GitHub Dark → Dark), otherwise MulTeam's preference.
+function paintThemeButtons() {
+  const mode = getEffectiveTheme();
+  document.querySelectorAll('[data-theme-set]').forEach((b) => b.classList.toggle('is-on', b.dataset.themeSet === mode));
+}
+document.addEventListener('multeam:themechange', paintThemeButtons);
 applyTheme(getTheme());
 
 document.querySelectorAll('[data-accent]').forEach((b) => {
