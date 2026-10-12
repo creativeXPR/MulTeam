@@ -35,7 +35,7 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
         </div>
         <div class="share__body scroll">
           <section class="share__sec" data-owner-only>
-            <h3>Invite by email</h3>
+            <h3>Invite people</h3>
             <form class="share__row" id="share-invite-form">
               <div class="share__combo">
                 <input type="text" inputmode="email" class="share__input" id="share-email" placeholder="Name or email" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="share-suggest" aria-autocomplete="list" required />
@@ -44,7 +44,7 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
               <select class="pill" id="share-invite-role"><option value="editor">Editor</option><option value="viewer">Viewer</option></select>
               <button type="submit" class="primary sm" id="share-invite-btn">Invite</button>
             </form>
-            <p class="field-hint">Suggestions are people from your other projects and past invites. They'll see the invite in MulTeam's notifications after signing in with that (verified) email.</p>
+            <p class="field-hint">Search MulTeam users by name, or type an exact email. Emails are never shown in results. Invites appear in their MulTeam notifications.</p>
             <div class="share__list" id="share-invites"></div>
           </section>
 
@@ -203,12 +203,18 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
   let pastInvites = [];
   let suggestions = [];
   let cursor = -1;
+  let picked = null;     // { uid, name } when a MulTeam user was chosen from search
+  let remote = [];       // searchUsers results for the current query
+  let remoteQ = '';
+  let searchTimer = null;
+  let searchSeq = 0;
   const emailEl = $('share-email');
   const suggestEl = $('share-suggest');
 
   function contacts() {
     const me = getUser();
     const inProject = new Set(Object.values(share.project?.members || {}).map((m) => m.email));
+    for (const i of share.invites || []) if (i.email) inProject.add(i.email);
     const byEmail = new Map();
     for (const p of myCloud) {
       for (const [uid, m] of Object.entries(p.members || {})) {
@@ -225,18 +231,46 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
     return [...byEmail.values()];
   }
 
-  function renderSuggest() {
+  // Server search (all MulTeam users by name, or exact email), debounced.
+  function searchRemote() {
+    clearTimeout(searchTimer);
     const q = emailEl.value.trim().toLowerCase();
-    suggestions = contacts()
+    if (q.length < 2) { remote = []; remoteQ = q; return; }
+    if (q === remoteQ) return;
+    searchTimer = setTimeout(async () => {
+      const seq = ++searchSeq;
+      try {
+        const res = await cloudCalls.searchUsers({ q, projectId: share.project?.id });
+        if (seq !== searchSeq) return;
+        remote = res.users || [];
+        remoteQ = q;
+        if (document.activeElement === emailEl) renderSuggest({ keepCursor: true });
+      } catch { /* offline / functions not deployed: contacts still work */ }
+    }, 250);
+  }
+
+  function renderSuggest({ keepCursor = false } = {}) {
+    const q = emailEl.value.trim().toLowerCase();
+    const local = contacts()
       .filter((c) => !q || c.email.includes(q) || c.name.toLowerCase().includes(q))
-      .sort((a, b) => b.projects.length - a.projects.length || a.email.localeCompare(b.email))
-      .slice(0, 8);
+      .sort((a, b) => b.projects.length - a.projects.length || a.email.localeCompare(b.email));
+    const localNames = new Set(local.map((c) => `${c.name}|${c.photo}`));
+    const fromSearch = (q && remoteQ === q ? remote : [])
+      .filter((u) => !localNames.has(`${u.name}|${u.photo}`))
+      .map((u) => ({ uid: u.uid, name: u.name || q, photo: u.photo, member: u.member, exactEmail: u.exactEmail, projects: [] }));
+    const prevCursor = cursor;
+    suggestions = [...local, ...fromSearch].slice(0, 10);
+    cursor = keepCursor && prevCursor >= 0 ? Math.min(prevCursor, suggestions.length - 1) : (suggestions.length && q ? 0 : -1);
     cursor = suggestions.length && q ? 0 : -1;
     if (!suggestions.length || document.activeElement !== emailEl) { closeSuggest(); return; }
+    const detail = (c) => {
+      if (c.uid) return c.member ? `already ${c.member === 'owner' ? 'the owner' : `a${c.member === 'editor' ? 'n editor' : ' viewer'}`} here` : c.exactEmail ? 'MulTeam user with this email' : 'MulTeam user';
+      return `${c.name ? `${esc(c.email)} · ` : ''}${c.projects.length ? `in ${esc(c.projects.slice(0, 2).join(', '))}${c.projects.length > 2 ? ` +${c.projects.length - 2}` : ''}` : 'invited before'}`;
+    };
     suggestEl.innerHTML = suggestions.map((c, i) => `
-      <button type="button" class="cselect__opt share__opt ${i === cursor ? 'is-cursor' : ''}" role="option" data-i="${i}">
+      <button type="button" class="cselect__opt share__opt ${i === cursor ? 'is-cursor' : ''}" role="option" data-i="${i}" ${c.member ? 'disabled' : ''}>
         <span class="share__av">${c.photo ? `<img src="${esc(c.photo)}" alt="" referrerpolicy="no-referrer" />` : esc(initialOf(c.name || c.email))}</span>
-        <span class="share__who"><b>${esc(c.name || c.email)}</b><small>${c.name ? `${esc(c.email)} · ` : ''}${c.projects.length ? `in ${esc(c.projects.slice(0, 2).join(', '))}${c.projects.length > 2 ? ` +${c.projects.length - 2}` : ''}` : 'invited before'}</small></span>
+        <span class="share__who"><b>${esc(c.name || c.email)}</b><small>${detail(c)}</small></span>
       </button>`).join('');
     suggestEl.hidden = false;
     emailEl.setAttribute('aria-expanded', 'true');
@@ -250,18 +284,20 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
   }
   function pick(i) {
     const c = suggestions[i];
-    if (!c) return;
-    emailEl.value = c.email;
+    if (!c || c.member) return;
+    // a user from search is invited by account (no email needed or shown)
+    picked = c.uid ? { uid: c.uid, name: c.name } : null;
+    emailEl.value = c.uid ? c.name : c.email;
     closeSuggest();
     emailEl.focus();
   }
-  emailEl.addEventListener('input', renderSuggest);
-  emailEl.addEventListener('focus', renderSuggest);
+  emailEl.addEventListener('input', () => { picked = null; renderSuggest(); searchRemote(); });
+  emailEl.addEventListener('focus', () => renderSuggest());
   emailEl.addEventListener('blur', () => setTimeout(closeSuggest, 120));
   emailEl.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); if (suggestEl.hidden) renderSuggest(); else moveCursor(1); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); moveCursor(-1); }
-    else if (e.key === 'Enter' && !suggestEl.hidden && cursor >= 0 && suggestions[cursor]?.email !== emailEl.value.trim().toLowerCase()) { e.preventDefault(); pick(cursor); }
+    else if (e.key === 'Enter' && !suggestEl.hidden && cursor >= 0 && !picked && suggestions[cursor]?.email !== emailEl.value.trim().toLowerCase()) { e.preventDefault(); pick(cursor); }
     else if (e.key === 'Escape' && !suggestEl.hidden) { e.preventDefault(); e.stopPropagation(); closeSuggest(); }
   });
   suggestEl.addEventListener('mousedown', (e) => {
@@ -277,19 +313,29 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
     closeSuggest();
     const btn = $('share-invite-btn');
     btn.disabled = true;
+    const role = $('share-invite-role').value;
     try {
-      await inviteByEmail(p, getUser(), $('share-email').value, $('share-invite-role').value);
-      toast(`Invite sent to ${$('share-email').value.trim()}`);
-      $('share-email').value = '';
+      if (picked && emailEl.value === picked.name) {
+        await cloudCalls.inviteUser({ projectId: p.id, uid: picked.uid, role });
+        toast(`Invite sent to ${picked.name}`);
+      } else {
+        const typed = emailEl.value.trim();
+        if (!typed.includes('@')) throw new Error('Pick someone from the list, or type their full email address.');
+        await inviteByEmail(p, getUser(), typed, role);
+        toast(`Invite sent to ${typed}`);
+      }
+      emailEl.value = '';
+      picked = null;
     } catch (err) { toast(cleanErr(err), 'error'); } finally { btn.disabled = false; }
   });
 
   function renderInvites(list) {
+    share.invites = list;
     $('share-invites').innerHTML = list.length ? list.map((i) => `
       <div class="share__item">
-        <span class="share__av is-pending">${esc(initialOf(i.email))}</span>
-        <span class="share__who"><b>${esc(i.email)}</b><small>Invited as ${ROLE_LABEL[i.role]} · waiting</small></span>
-        <button type="button" class="secondary sm" data-revoke-invite="${esc(i.id)}" data-email="${esc(i.email)}">Withdraw</button>
+        <span class="share__av is-pending">${i.inviteePhoto ? `<img src="${esc(i.inviteePhoto)}" alt="" referrerpolicy="no-referrer" />` : esc(initialOf(i.inviteeName || i.email))}</span>
+        <span class="share__who"><b>${esc(i.inviteeName || i.email)}</b><small>Invited as ${ROLE_LABEL[i.role]} · waiting</small></span>
+        <button type="button" class="secondary sm" data-revoke-invite="${esc(i.id)}" data-email="${esc(i.inviteeName || i.email)}">Withdraw</button>
       </div>`).join('') : '';
   }
   $('share-invites').addEventListener('click', async (e) => {

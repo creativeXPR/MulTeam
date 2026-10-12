@@ -84,8 +84,13 @@ exports.acceptInvite = onCall(async (req) => {
   if (!snap.exists) throw new HttpsError('not-found', 'This invite was withdrawn.');
   const inv = snap.data();
   if (inv.status !== 'pending') throw new HttpsError('failed-precondition', 'This invite was already used.');
-  if (!auth.token.email_verified) throw new HttpsError('permission-denied', 'Verify your email address first (check your inbox), then accept the invite.');
-  if (inv.email !== String(auth.token.email || '').toLowerCase()) throw new HttpsError('permission-denied', 'This invite was sent to a different email address.');
+  if (inv.inviteeUid) {
+    // invited by account (picked from user search): the uid proves who it is
+    if (inv.inviteeUid !== auth.uid) throw new HttpsError('permission-denied', 'This invite is for a different account.');
+  } else {
+    if (!auth.token.email_verified) throw new HttpsError('permission-denied', 'Verify your email address first (check your inbox), then accept the invite.');
+    if (inv.email !== String(auth.token.email || '').toLowerCase()) throw new HttpsError('permission-denied', 'This invite was sent to a different email address.');
+  }
   const res = await addMember(inv.projectId, auth, GRANTABLE.includes(inv.role) ? inv.role : 'viewer');
   await ref.update({ status: 'accepted', acceptedBy: auth.uid, respondedAt: FieldValue.serverTimestamp() });
   return res;
@@ -96,9 +101,70 @@ exports.declineInvite = onCall(async (req) => {
   const ref = db.doc(`invites/${str(req.data?.inviteId, 'invite')}`);
   const snap = await ref.get();
   if (!snap.exists) return { ok: true };
-  if (snap.data().email !== String(auth.token.email || '').toLowerCase()) throw new HttpsError('permission-denied', 'This invite was sent to a different email address.');
+  const inv = snap.data();
+  const mine = inv.inviteeUid ? inv.inviteeUid === auth.uid : inv.email === String(auth.token.email || '').toLowerCase();
+  if (!mine) throw new HttpsError('permission-denied', 'This invite is for someone else.');
   await ref.update({ status: 'declined', respondedAt: FieldValue.serverTimestamp() });
   return { ok: true };
+});
+
+// ---------- user search (like GitHub's collaborator search) ----------
+// Finds MulTeam users by name (prefix) or by EXACT email. Results never
+// include anyone's email address — only name and photo — so the directory
+// can't be used to harvest emails. users/{uid} keeps nameLower/emailLower
+// (written by each user's app on sign-in).
+const toResult = (d) => ({ uid: d.id, name: d.get('displayName') || '', photo: d.get('photoURL') || '' });
+
+exports.searchUsers = onCall(async (req) => {
+  const auth = signedIn(req);
+  const q = String(req.data?.q || '').trim().toLowerCase().slice(0, 100);
+  if (q.length < 2) return { users: [] };
+  const found = new Map();
+  if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(q)) {
+    const byEmail = await db.collection('users').where('emailLower', '==', q).limit(1).get();
+    byEmail.forEach((d) => found.set(d.id, { ...toResult(d), exactEmail: true }));
+  }
+  if (!q.includes('@')) {
+    const byName = await db.collection('users').where('nameLower', '>=', q).where('nameLower', '<=', q + '\uf8ff').limit(10).get();
+    byName.forEach((d) => { if (!found.has(d.id) && d.get('displayName')) found.set(d.id, toResult(d)); });
+  }
+  found.delete(auth.uid);
+  let members = {};
+  if (typeof req.data?.projectId === 'string' && req.data.projectId) {
+    const p = await db.doc(`projects/${req.data.projectId}`).get();
+    if (p.exists && p.data().members?.[auth.uid]) members = p.data().members || {};
+  }
+  return { users: [...found.values()].slice(0, 8).map((u) => ({ ...u, member: members[u.uid]?.role || null })) };
+});
+
+// Owner invites a user picked from search. The invite is addressed to the
+// account (inviteeUid), so the owner never learns their email.
+exports.inviteUser = onCall(async (req) => {
+  const auth = signedIn(req);
+  const project = await projectFor(req.data?.projectId);
+  requireOwner(project, auth.uid);
+  const uid = str(req.data?.uid, 'user');
+  const role = GRANTABLE.includes(req.data?.role) ? req.data.role : 'editor';
+  if (uid === auth.uid) throw new HttpsError('failed-precondition', "You're already the owner.");
+  if (project.data.members?.[uid]) throw new HttpsError('already-exists', 'They are already a member.');
+  const user = await db.doc(`users/${uid}`).get();
+  if (!user.exists) throw new HttpsError('not-found', 'That MulTeam user no longer exists.');
+  const dup = await db.collection('invites').where('projectId', '==', project.ref.id).where('inviteeUid', '==', uid).where('status', '==', 'pending').limit(1).get();
+  if (!dup.empty) throw new HttpsError('already-exists', 'They already have a pending invite to this project.');
+  await db.collection('invites').add({
+    projectId: project.ref.id,
+    projectName: project.data.name,
+    ownerId: auth.uid,
+    inviteeUid: uid,
+    inviteeName: user.get('displayName') || 'MulTeam user',
+    inviteePhoto: user.get('photoURL') || '',
+    email: null,
+    role,
+    status: 'pending',
+    invitedBy: { uid: auth.uid, name: profileOf(auth).name },
+    createdAt: FieldValue.serverTimestamp()
+  });
+  return { ok: true, name: user.get('displayName') || 'MulTeam user' };
 });
 
 // ---------- invite links / codes ----------

@@ -23,9 +23,13 @@ service cloud.firestore {
     }
     function myEmail() { return request.auth.token.email.lower(); }
 
-    // Profiles: your own only (member names/emails live on the project).
+    // Profiles: your own only. Other users are found through the
+    // searchUsers function, which returns names/photos but never emails.
     match /users/{userId} {
-      allow read, write: if signedIn() && request.auth.uid == userId;
+      allow read: if signedIn() && request.auth.uid == userId;
+      allow write: if signedIn() && request.auth.uid == userId
+        && (!('emailLower' in request.resource.data) || request.resource.data.emailLower == myEmail())
+        && (!('nameLower' in request.resource.data) || request.resource.data.nameLower is string);
 
       // Legacy location of cloud projects (before members/invites). Owners
       // can still read + delete theirs while the app moves them to /projects.
@@ -72,6 +76,7 @@ service cloud.firestore {
         && request.resource.data.email != myEmail();
       allow read: if signedIn() && (
         resource.data.ownerId == request.auth.uid
+        || resource.data.inviteeUid == request.auth.uid
         || (request.auth.token.email_verified == true && resource.data.email == myEmail()));
       allow delete: if signedIn() && resource.data.ownerId == request.auth.uid;
       allow update: if false;

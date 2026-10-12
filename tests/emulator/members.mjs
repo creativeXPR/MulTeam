@@ -157,6 +157,49 @@ await check('members list is consistent', async () => {
 });
 await check('other users profiles are private', () => fails(getDoc(doc(eve.fs, 'users', owner.uid))));
 
+// ---------- user search + invite by account (GitHub-style) ----------
+const profile = (u, name, email) => setDoc(doc(u.fs, 'users', u.uid), { uid: u.uid, displayName: name, nameLower: name.toLowerCase(), email, emailLower: email, photoURL: '' }, { merge: true });
+await check('users write their own searchable profile', async () => {
+  await profile(owner, 'Olu Owner', 'owner@team.dev');
+  await profile(bob, 'Bob Builder', 'bob@team.dev');
+  await profile(carol, '', 'carol@team.dev');
+  await profile(eve, 'Eve', 'eve@evil.dev');
+  await profile(dan, 'Dan', 'dan@team.dev');
+});
+await check("cannot write someone else's profile", () => fails(setDoc(doc(eve.fs, 'users', bob.uid), { displayName: 'hacked' }, { merge: true })));
+await check('cannot claim another email in your profile', () => fails(setDoc(doc(eve.fs, 'users', eve.uid), { emailLower: 'bob@team.dev' }, { merge: true })));
+await check('search by name finds users, without emails', async () => {
+  const r = await eve.call('searchUsers')({ q: 'bo' });
+  eq(r.users.map((u) => u.name), ['Bob Builder'], 'names');
+  if (JSON.stringify(r).includes('@')) throw new Error('an email leaked into results');
+});
+await check('search marks existing members', async () => eq((await owner.call('searchUsers')({ q: 'bob', projectId: P })).users[0].member, 'viewer', 'member'));
+await check('exact email finds a user with no display name', async () => {
+  const r = await owner.call('searchUsers')({ q: 'carol@team.dev' });
+  eq([r.users.length, r.users[0]?.exactEmail], [1, true], 'exact');
+});
+await check('partial emails find nothing', async () => eq((await owner.call('searchUsers')({ q: 'carol@team' })).users.length, 0, 'partial'));
+await check('you are not in your own results', async () => eq((await owner.call('searchUsers')({ q: 'olu' })).users.length, 0, 'self'));
+let carolUid;
+await check('owner invites carol by account (no email stored)', async () => {
+  carolUid = (await owner.call('searchUsers')({ q: 'carol@team.dev' })).users[0].uid;
+  await owner.call('inviteUser')({ projectId: P, uid: carolUid, role: 'editor' });
+  const inv = await getDocs(query(collection(owner.fs, 'invites'), where('ownerId', '==', owner.uid), where('projectId', '==', P), where('status', '==', 'pending')));
+  const d = inv.docs.find((x) => x.data().inviteeUid === carolUid).data();
+  eq([d.email, d.inviteeName], [null, 'MulTeam user'], 'invite');
+});
+await check('duplicate account invites are refused', () => fails(owner.call('inviteUser')({ projectId: P, uid: carolUid, role: 'editor' }), /already have a pending/));
+await check('non-owners cannot invite by account', () => fails(bob.call('inviteUser')({ projectId: P, uid: carolUid, role: 'editor' }), /owner/));
+await check('cannot invite an existing member', () => fails(owner.call('inviteUser')({ projectId: P, uid: bob.uid, role: 'editor' }), /already a member/));
+let carolInv;
+await check('unverified carol sees her account invite', async () => {
+  const s2 = await getDocs(query(collection(carol.fs, 'invites'), where('inviteeUid', '==', carol.uid), where('status', '==', 'pending')));
+  eq(s2.size, 1, 'invites'); carolInv = s2.docs[0].id;
+});
+await check("eve cannot see carol's account invite", () => fails(getDocs(query(collection(eve.fs, 'invites'), where('inviteeUid', '==', carol.uid)))));
+await check("eve cannot accept carol's account invite", () => fails(eve.call('acceptInvite')({ inviteId: carolInv }), /different account/));
+await check('carol accepts (account invites need no verified email)', async () => eq((await carol.call('acceptInvite')({ inviteId: carolInv })).role, 'editor', 'role'));
+
 const failed = results.filter((r) => r[0] === 'FAIL');
 for (const r of results) console.log(r[0].padEnd(5), r[1], r[2] ? `\n      → ${r[2]}` : '');
 console.log(`\n${results.length - failed.length} passed, ${failed.length} failed`);

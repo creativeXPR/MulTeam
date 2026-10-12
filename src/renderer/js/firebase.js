@@ -71,7 +71,26 @@ export function watchCloudConnection(callback) {
 }
 
 export function watchAuthState(callback) {
-  return onAuthStateChanged(auth, callback);
+  return onAuthStateChanged(auth, (user) => {
+    if (user) syncProfile(user).catch(() => {});
+    callback(user);
+  });
+}
+
+// Keeps users/{uid} current so others can find you by name in Share
+// (searchUsers returns names/photos only, never emails).
+export async function syncProfile(user = auth.currentUser) {
+  if (!user) return;
+  const name = user.displayName || '';
+  await setDoc(doc(firestore, COLLECTIONS.USERS, user.uid), {
+    uid: user.uid,
+    displayName: name,
+    nameLower: name.toLowerCase(),
+    email: user.email || '',
+    emailLower: (user.email || '').toLowerCase(),
+    photoURL: user.photoURL || '',
+    updatedAt: serverTimestamp()
+  }, { merge: true });
 }
 
 export async function signIn(email, password) {
@@ -82,6 +101,7 @@ export async function signIn(email, password) {
 export async function signUp(email, password, displayName) {
   const { user } = await createUserWithEmailAndPassword(auth, email, password);
   if (displayName) await updateProfile(user, { displayName });
+  syncProfile(user).catch(() => {});
   // invites can only be accepted with a verified email
   sendEmailVerification(user).catch(() => {});
 
@@ -149,6 +169,8 @@ export const cloudCalls = {
   respondJoinRequest: callable('respondJoinRequest'),
   setMemberRole: callable('setMemberRole'),
   removeMember: callable('removeMember'),
+  searchUsers: callable('searchUsers'),
+  inviteUser: callable('inviteUser'),
   syncMembers: callable('syncMembers')
 };
 
@@ -326,10 +348,21 @@ export function watchJoinRequests(projectId, cb) {
 // ---------- invites (invitee side) ----------
 // Only verified emails can see/accept invites (otherwise anyone could sign
 // up with a teammate's address and take their invite).
+// Two kinds: addressed to your account (picked from user search) and
+// addressed to your email (needs a verified email).
 export function watchMyInvites(user, cb) {
-  if (!user?.email || !user.emailVerified) { cb([]); return () => {}; }
-  return onSnapshot(query(collection(firestore, 'invites'), where('email', '==', user.email.toLowerCase()), where('status', '==', 'pending')),
-    (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), () => cb([]));
+  if (!user) { cb([]); return () => {}; }
+  const lists = { uid: [], email: [] };
+  const emit = () => {
+    const byId = new Map([...lists.uid, ...lists.email].map((i) => [i.id, i]));
+    cb([...byId.values()]);
+  };
+  const listen = (key, q) => onSnapshot(q, (snap) => { lists[key] = snap.docs.map((d) => ({ id: d.id, ...d.data() })); emit(); }, () => { lists[key] = []; emit(); });
+  const unsubs = [listen('uid', query(collection(firestore, 'invites'), where('inviteeUid', '==', user.uid), where('status', '==', 'pending')))];
+  if (user.email && user.emailVerified) {
+    unsubs.push(listen('email', query(collection(firestore, 'invites'), where('email', '==', user.email.toLowerCase()), where('status', '==', 'pending'))));
+  }
+  return () => unsubs.forEach((u) => u());
 }
 
 export async function resendVerification() {
