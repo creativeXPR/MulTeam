@@ -2,7 +2,7 @@ import { watchAuthState, watchCloudConnection, signOut, createCloudProject, dele
 import { requireAuth, openSignIn } from './authModal.js';
 import { FileDocument, EditorView, setMonacoTheme } from './editor.js';
 import { PresenceBar } from './presence.js';
-import { applyStoredTheme, setTheme, getTheme, getEffectiveTheme, setAccent, getAccent } from './theme.js';
+import { applyStoredTheme, setTheme, getTheme, getEffectiveTheme, setAccent, getAccentChoice, hasAppPalette } from './theme.js';
 import { getSettings, updateSettings, monacoOptionsFromSettings } from './settings.js';
 import { initCommandPalette } from './commandPalette.js';
 import { initBottomPanel } from './panel.js';
@@ -1722,19 +1722,17 @@ function paintThemeButtons() {
 document.addEventListener('multeam:themechange', paintThemeButtons);
 applyTheme(getTheme());
 
-document.querySelectorAll('[data-accent]').forEach((b) => {
-  b.addEventListener('click', () => {
-    document.querySelectorAll('[data-accent]').forEach((x) => x.classList.remove('is-on'));
-    b.classList.add('is-on');
-    setAccent(b.dataset.accent);
-  });
-});
-(() => {
-  const accent = getAccent();
-  const match = document.querySelector(`[data-accent="${accent}"]`);
-  if (match) { document.querySelectorAll('[data-accent]').forEach((x) => x.classList.remove('is-on')); match.classList.add('is-on'); }
-  setAccent(accent);
-})();
+// Accent: a picked color always wins (even over a color theme); "Auto"
+// follows the color theme's own accent, or MulTeam violet without one.
+function paintAccentSwatches() {
+  const choice = getAccentChoice().toLowerCase();
+  document.querySelectorAll('[data-accent]').forEach((x) => x.classList.toggle('is-on', x.dataset.accent.toLowerCase() === choice));
+  const hint = document.getElementById('accentHint');
+  if (hint) hint.textContent = choice ? 'Used for actions and active states' : (hasAppPalette() ? 'Auto · from the color theme' : 'Auto · MulTeam violet');
+}
+document.querySelectorAll('[data-accent]').forEach((b) => b.addEventListener('click', () => setAccent(b.dataset.accent)));
+document.addEventListener('multeam:themechange', paintAccentSwatches);
+paintAccentSwatches();
 
 function applyLiveEditorSettings() {
   for (const g of groups.values()) g.view?.applyEditorSettings(monacoOptionsFromSettings());

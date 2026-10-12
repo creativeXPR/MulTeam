@@ -7,7 +7,8 @@
 // palette": its UI colors are mapped onto MulTeam's design tokens (see
 // extensions.js#toAppPalette) and set on :root, overriding light/dark.
 const THEME_KEY = 'multeam:theme';
-const ACCENT_KEY = 'multeam:accent';
+const ACCENT_KEY = 'multeam:accent';           // legacy (was rewritten on every boot)
+const ACCENT_CHOICE_KEY = 'multeam:accentChoice'; // a hex the user picked, or absent = auto
 const PALETTE_KEY = 'multeam:palette';
 const PALETTE_VARS = ['--bg', '--surface', '--line', '--line-soft', '--fill', '--fill-2', '--text', '--text-2', '--muted',
   '--danger', '--warn', '--success', '--scrim', '--shadow', '--shadow-float'];
@@ -54,8 +55,23 @@ function shade(hex, pct) {
   return '#' + [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => f(v).toString(16).padStart(2, '0')).join('');
 }
 
+const BRAND = '#6D4AFF';
+
+// The user's explicit pick, or '' = auto (the color theme's accent, else violet).
+export function getAccentChoice() {
+  let v = localStorage.getItem(ACCENT_CHOICE_KEY);
+  if (v === null) {
+    // migrate: the old key only meant a real choice if it isn't the default
+    const old = localStorage.getItem(ACCENT_KEY);
+    v = old && old.toUpperCase() !== BRAND ? old : '';
+    try { localStorage.setItem(ACCENT_CHOICE_KEY, v); } catch { /* non-fatal */ }
+  }
+  return v;
+}
+
+// The accent actually on screen.
 export function getAccent() {
-  return localStorage.getItem(ACCENT_KEY) || '#6D4AFF';
+  return getAccentChoice() || palette?.accent || BRAND;
 }
 
 function applyAccentVars(hex) {
@@ -66,9 +82,11 @@ function applyAccentVars(hex) {
   root.setProperty('--violet-300', shade(hex, 38));
 }
 
+// hex = always use this accent (even over a color theme); '' = auto.
 export function setAccent(hex) {
-  localStorage.setItem(ACCENT_KEY, hex);
-  if (!palette) applyAccentVars(hex); // a color theme brings its own accent
+  try { localStorage.setItem(ACCENT_CHOICE_KEY, hex || ''); } catch { /* non-fatal */ }
+  applyAccentVars(getAccent());
+  emitChange();
 }
 
 // ---------- app palette (whole-app color themes) ----------
@@ -77,7 +95,7 @@ function applyPaletteNow(p) {
   for (const v of PALETTE_VARS) st.removeProperty(v);
   for (const [k, v] of Object.entries(p.vars || {})) if (PALETTE_VARS.includes(k) && v) st.setProperty(k, v);
   document.documentElement.dataset.theme = p.mode;
-  if (p.accent) applyAccentVars(p.accent);
+  applyAccentVars(getAccent());
   syncTitleBar(p.mode, p.titleBar || null);
 }
 

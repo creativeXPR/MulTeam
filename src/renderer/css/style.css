@@ -873,6 +873,7 @@ select.pill.sm { padding: 2px 8px; font-size: 11px; }
 .swatches { display: flex; gap: 8px; }
 .swatch { width: 18px; height: 18px; padding: 0; border-radius: 50%; border: 0; outline: 1.5px solid transparent; outline-offset: 2px; transition: outline-color .15s; }
 .swatch.is-on { outline-color: var(--text-2); }
+.swatch--auto { background: conic-gradient(from 45deg, var(--violet-500) 0 50%, transparent 50%), var(--fill-2); box-shadow: inset 0 0 0 1.5px var(--violet-500); }
 
 .profile {
   position: fixed; z-index: 50; top: calc(var(--nav-h) + 4px);

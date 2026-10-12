@@ -476,9 +476,10 @@ multeam.on('save', ({ path }) =&gt; {});</code></pre>
             <div class="set-row__ctl"><select class="pill" id="iconTheme"><option value="">MulTeam (built-in)</option></select></div>
           </div>
           <div class="set-row">
-            <div class="set-row__txt"><b>Accent</b><span>Used for actions and active states</span></div>
+            <div class="set-row__txt"><b>Accent</b><span id="accentHint">Used for actions and active states</span></div>
             <div class="set-row__ctl swatches" id="swatches">
-              <button class="swatch is-on" data-accent="#6D4AFF" style="background:#6D4AFF" aria-label="Violet"></button>
+              <button class="swatch swatch--auto" data-accent="" title="Auto — match the color theme (violet when none)" aria-label="Auto"></button>
+              <button class="swatch" data-accent="#6D4AFF" style="background:#6D4AFF" aria-label="Violet"></button>
               <button class="swatch" data-accent="#8B5CF6" style="background:#8B5CF6" aria-label="Purple"></button>
               <button class="swatch" data-accent="#C026D3" style="background:#C026D3" aria-label="Fuchsia"></button>
               <button class="swatch" data-accent="#4F46E5" style="background:#4F46E5" aria-label="Indigo"></button>
