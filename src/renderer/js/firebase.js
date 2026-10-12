@@ -8,7 +8,9 @@ import {
   signInWithPopup,
   signOut as firebaseSignOut,
   updateProfile,
-  sendEmailVerification
+  sendEmailVerification,
+  connectAuthEmulator,
+  signInWithCredential
 } from 'firebase/auth';
 import {
   getFirestore,
@@ -28,18 +30,31 @@ import {
   addDoc,
   where,
   onSnapshot,
-  Timestamp
+  Timestamp,
+  connectFirestoreEmulator
 } from 'firebase/firestore';
-import { getFunctions, httpsCallable } from 'firebase/functions';
-import { getDatabase, ref, onValue, get, set, remove } from 'firebase/database';
+import { getFunctions, httpsCallable, connectFunctionsEmulator } from 'firebase/functions';
+import { getDatabase, ref, onValue, get, set, remove, connectDatabaseEmulator } from 'firebase/database';
 import { isSupported as analyticsIsSupported, getAnalytics } from 'firebase/analytics';
 import { firebaseConfig, FIRESTORE_DATABASE_ID } from './firebaseConfig.js';
 import { COLLECTIONS, ROLES } from '../../shared/constants.js';
 
-const app = initializeApp(firebaseConfig);
+// Developer/test mode: localStorage 'multeam:emulators' = '1' points the app
+// at the local Firebase emulators (npm run test:members ports) instead of
+// production. Never set by the app itself.
+const EMULATORS = (() => { try { return localStorage.getItem('multeam:emulators') === '1'; } catch { return false; } })();
+const app = initializeApp(EMULATORS
+  ? { ...firebaseConfig, projectId: 'demo-multeam', databaseURL: 'http://127.0.0.1:9411?ns=demo-multeam' }
+  : firebaseConfig);
 export const auth = getAuth(app);
 export const firestore = getFirestore(app, FIRESTORE_DATABASE_ID);
 export const rtdb = getDatabase(app);
+if (EMULATORS) {
+  connectAuthEmulator(auth, 'http://127.0.0.1:9109', { disableWarnings: true });
+  connectFirestoreEmulator(firestore, '127.0.0.1', 8187);
+  connectDatabaseEmulator(rtdb, '127.0.0.1', 9411);
+  console.info('[firebase] using local emulators');
+}
 
 // Analytics assumes a real browser (cookies, gtag, etc.) and isn't reliably
 // supported inside an Electron renderer — isSupported() resolves false
@@ -98,6 +113,14 @@ export async function signInWithGoogle() {
   return user;
 }
 
+// Emulator mode only: sign in as a test account (the Auth emulator accepts
+// a fake Google credential).
+export async function signInForTests({ uid, email, name }) {
+  if (!EMULATORS) throw new Error('Only available with the emulators.');
+  return (await signInWithCredential(auth, GoogleAuthProvider.credential(JSON.stringify({ sub: uid, email, email_verified: true, name })))).user;
+}
+if (EMULATORS) window.__multeamTest = { signIn: signInForTests };
+
 export function signOut() {
   return firebaseSignOut(auth);
 }
@@ -112,6 +135,7 @@ export function signOut() {
 // RTDB projectMembers/{projectId} for the live-edit rules.
 // ------------------------------------------------------------------
 const functions = getFunctions(app, 'europe-west1');
+if (EMULATORS) connectFunctionsEmulator(functions, '127.0.0.1', 5011);
 const callable = (name) => {
   const fn = httpsCallable(functions, name);
   return async (data) => {
@@ -314,10 +338,10 @@ export async function refreshUser() {
   return auth.currentUser;
 }
 
-export async function upsertDocumentMeta(docId, { projectId, ownerId, path, language, userId }) {
+export async function upsertDocumentMeta(docId, { projectId, path, language, userId }) {
   await setDoc(
     doc(firestore, COLLECTIONS.DOCUMENTS, docId),
-    { projectId, ownerId, path, language, lastSavedBy: userId, updatedAt: serverTimestamp() },
+    { projectId, path, language, lastSavedBy: userId, updatedAt: serverTimestamp() },
     { merge: true }
   );
 }

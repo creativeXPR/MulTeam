@@ -143,6 +143,8 @@ export const MarkerSeverity = monaco.MarkerSeverity;
 // One open FILE (shared by every editor group showing it): the text model,
 // live-collaboration plumbing (Yjs + Firebase) and the copy known on disk.
 // ------------------------------------------------------------------
+const LIVE_TIMEOUT_MS = 6000;
+
 export class FileDocument {
   // live: { projectId, fileKey } for cloud projects; onDenied(err) when the
   // live document can't be reached (not a member, rules, offline…)
@@ -163,29 +165,47 @@ export class FileDocument {
     // from .ts (JSX), and diagnostics/markers can be traced back to a file.
     const uri = monaco.Uri.file(this.filePath);
     monaco.editor.getModel(uri)?.dispose();
-    // Purely local (non-cloud) projects never touch Yjs/Firebase at all.
-    this.model = monaco.editor.createModel(this.collaborative ? '' : initialContent, undefined, uri);
+    // Always starts with the text on disk; a cloud file then binds to the
+    // live doc once it has content (the binding swaps in the shared text).
+    this.model = monaco.editor.createModel(initialContent, undefined, uri);
     this.diskText = initialContent;
+    this.ready = Promise.resolve(false);
     if (!this.collaborative) return this;
 
-    const yText = this.ydoc.getText('monaco');
-    // The provider seeds the live doc from disk only if none exists yet (once,
-    // by transaction); otherwise the shared text arrives from Firebase.
+    // The provider seeds the live doc from disk only if none exists yet
+    // (once, by transaction); otherwise the shared text arrives from Firebase.
     this.provider = new FirebaseProvider({ ...this.live, seedText: initialContent }, this.ydoc, { onDenied: this.onDenied });
-    // The editors set is live: views added later get remote cursors too.
-    this.binding = new MonacoBinding(yText, this.model, this.editors, this.provider.awareness);
-    this.provider.awareness.on('change', this.binding._rerenderDecorations);
+    const timeout = new Promise((r) => setTimeout(() => r(false), LIVE_TIMEOUT_MS));
+    this.ready = Promise.race([this.provider.firstState, this.provider.noLiveDocYet, timeout]).then((live) => {
+      if (live) this._bind();
+      else {
+        // Not live yet (viewer on a never-opened file, or the session is
+        // slow/offline). Bind later only if nothing was typed meanwhile —
+        // binding replaces the editor text with the shared text.
+        this.provider.firstState.then((ok) => { if (ok && this.model && !this.model.isDisposed() && this.model.getValue() === initialContent) this._bind(); });
+      }
+      return live;
+    });
     return this;
+  }
+
+  _bind() {
+    if (this.binding || !this.provider || this.model.isDisposed()) return;
+    // The editors set is live: views added later get remote cursors too.
+    this.binding = new MonacoBinding(this.ydoc.getText('monaco'), this.model, this.editors, this.provider.awareness);
+    this.provider.awareness.on('change', this.binding._rerenderDecorations);
+    this.binding._rerenderDecorations();
+    this.onLive?.();
   }
 
   // Called by each EditorView showing this file.
   attach(editor) {
     this.editors.add(editor);
-    if (!this.binding) return;
+    if (!this.collaborative) return;
     // broadcast this view's cursor/selection to collaborators
-    const ytext = this.binding.ytext;
     editor.onDidChangeCursorSelection(() => {
-      if (editor.getModel() !== this.model || !this.editors.has(editor)) return;
+      const ytext = this.binding?.ytext;
+      if (!ytext || editor.getModel() !== this.model || !this.editors.has(editor)) return;
       const sel = editor.getSelection();
       if (!sel) return;
       let anchor = this.model.getOffsetAt(sel.getStartPosition());
@@ -196,7 +216,7 @@ export class FileDocument {
         head: Y.createRelativePositionFromTypeIndex(ytext, head)
       });
     });
-    this.binding._rerenderDecorations();
+    this.binding?._rerenderDecorations();
   }
 
   detach(editor) { this.editors.delete(editor); }

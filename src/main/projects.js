@@ -43,13 +43,20 @@ async function writeRecord(record) {
   return record;
 }
 
-async function createProject({ name, folderPath, cloudEnabled, workspaceId }) {
+// `id` is passed when linking a cloud project you joined to a local folder
+// (local and cloud records share the id); `joined` marks it as not yours.
+async function createProject({ id, name, folderPath, cloudEnabled, workspaceId, joined }) {
   const now = Date.now();
+  if (id !== undefined) {
+    if (!/^[A-Za-z0-9_-]{6,64}$/.test(String(id))) throw new Error('Invalid project id.');
+    if (await getProject(id)) throw new Error('This project is already set up on this computer.');
+  }
   return writeRecord({
-    id: crypto.randomUUID(),
+    id: id || crypto.randomUUID(),
     name,
     folderPath,
     cloudEnabled: !!cloudEnabled,
+    ...(joined ? { joined: true } : {}),
     workspaceId: workspaceId || (await readWorkspaces()).currentId,
     createdAt: now,
     lastOpenedAt: now

@@ -166,6 +166,20 @@ await check('a viewer receives live text but cannot change the shared doc', asyn
   a.provider.destroy(); v.provider.destroy();
 });
 
+await check('viewer on a never-opened file waits, then goes live when an editor opens it', async () => {
+  const v = client('carol', 'fresh', 'disk text');
+  await v.provider.synced;
+  const early = await Promise.race([v.provider.firstState, wait(1200).then(() => 'pending')]);
+  eq(early, 'pending', 'viewer not live before any editor');
+  eq(v.text(), '', 'viewer did not create the live doc');
+  const a = client('alice', 'fresh', 'disk text');
+  await a.provider.synced;
+  eq(await Promise.race([v.provider.firstState, wait(5000).then(() => 'timeout')]), true, 'viewer became live');
+  await until(() => v.text() === 'disk text');
+  eq(v.text(), 'disk text', 'viewer has the shared text once');
+  a.provider.destroy(); v.provider.destroy();
+});
+
 await check('a stranger cannot open the live doc', async () => {
   const e = client('eve', 'view', 'mine');
   await e.provider.synced;

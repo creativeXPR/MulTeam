@@ -116,6 +116,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     hasEslint: (filePath, root) => ipcRenderer.invoke(IPC.TOOL_HAS_ESLINT, filePath, root)
   },
 
+  // multeam:// links (invite codes): the one that launched the app, and
+  // any clicked while it's running
+  takeLaunchLink: () => ipcRenderer.invoke(IPC.APP_TAKE_LINK),
+  onOpenLink: (cb) => { const h = (_e, url) => cb(url); ipcRenderer.on(IPC.APP_OPEN_LINK, h); return () => ipcRenderer.removeListener(IPC.APP_OPEN_LINK, h); },
+
   // Run the active file in the terminal (main/runner.js)
   run: {
     extensions: () => ipcRenderer.invoke(IPC.RUN_EXTENSIONS),

@@ -68,7 +68,21 @@ export class FirebaseProvider {
     this._onDocUpdate = this._onDocUpdate.bind(this);
     this._onAwarenessUpdate = this._onAwarenessUpdate.bind(this);
 
+    // resolves (true) once the live doc has content — right away for an
+    // existing doc or one this client seeded; later for a viewer opening a
+    // file no editor has opened yet (viewers can't create live docs)
+    this.hasState = false;
+    this.firstState = new Promise((resolve) => { this._resolveFirstState = resolve; });
+    // resolves false as soon as it's known there's no live doc yet and this
+    // client can't create one (a viewer) — no need to wait for a timeout
+    this.noLiveDocYet = new Promise((resolve) => { this._resolveNoLiveDoc = resolve; });
     this.synced = this._connect(seedText).catch((err) => this._denied(err));
+  }
+
+  _gotState() {
+    if (this.hasState) return;
+    this.hasState = true;
+    this._resolveFirstState(true);
   }
 
   _denied(err) {
@@ -79,23 +93,31 @@ export class FirebaseProvider {
 
   async _seedIfNew(seedText) {
     const [snap, updates] = await Promise.all([get(this.snapshotRef), get(this.updatesRef)]);
-    if (snap.exists() || updates.exists()) return;
+    if (snap.exists() || updates.exists()) return true;
     const seed = new Y.Doc();
     if (seedText) seed.getText('monaco').insert(0, seedText);
     const state = toBase64(Y.encodeStateAsUpdate(seed));
     seed.destroy();
-    // only the first writer wins; everyone else aborts and receives theirs
-    await runTransaction(this.snapshotRef, (cur) => (cur ? undefined : { state, updatedAt: Date.now() }));
+    // only the first writer wins; everyone else aborts and receives theirs.
+    // Viewers aren't allowed to create it — they wait for an editor.
+    try {
+      await runTransaction(this.snapshotRef, (cur) => (cur ? undefined : { state, updatedAt: Date.now() }));
+      return true;
+    } catch (err) {
+      if (!/permission/i.test(err?.message || '')) throw err;
+      return false;
+    }
   }
 
   async _connect(seedText) {
-    await this._seedIfNew(seedText);
+    const exists = await this._seedIfNew(seedText);
     if (this._destroyed) return;
+    if (!exists) this._resolveNoLiveDoc(false);
 
     const fail = (err) => this._denied(err);
     onValue(this.snapshotRef, (snap) => {
       const v = snap.val();
-      if (v?.state) Y.applyUpdate(this.doc, fromBase64(v.state), this);
+      if (v?.state) { Y.applyUpdate(this.doc, fromBase64(v.state), this); this._gotState(); }
     }, fail);
 
     // Firebase fires onChildAdded once per existing child on attach, then live.
@@ -103,6 +125,7 @@ export class FirebaseProvider {
       const { state, origin } = snap.val() || {};
       this._appliedKeys.add(snap.key);
       if (origin !== this.doc.clientID && state) Y.applyUpdate(this.doc, fromBase64(state), this);
+      this._gotState();
       this._maybeCompact();
     }, fail);
 
@@ -162,6 +185,7 @@ export class FirebaseProvider {
 
   destroy() {
     this._destroyed = true;
+    this._resolveFirstState(false);
     this.doc.off('update', this._onDocUpdate);
     this.awareness.off('update', this._onAwarenessUpdate);
 

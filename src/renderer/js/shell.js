@@ -1,5 +1,6 @@
 import { watchAuthState, watchCloudConnection, signOut, createCloudProject, deleteCloudProject, upsertDocumentMeta, ensureLiveMembership } from './firebase.js';
 import { fileKeyFor } from './sync.js';
+import { initCollab } from './collab.js';
 import { requireAuth, openSignIn } from './authModal.js';
 import { FileDocument, EditorView, setMonacoTheme } from './editor.js';
 import { PresenceBar } from './presence.js';
@@ -60,6 +61,7 @@ let allProjects = [];   // the CURRENT workspace's projects (what the Explorer/D
 let everyProject = [];  // all registered projects, across workspaces
 let workspaces = [];
 let currentWsId = null;
+let collab = null; // collaboration UI (collab.js), set up once the shell is ready
 let wsFilter = 'all';
 
 let project = null; // currently open project, or null
@@ -232,6 +234,7 @@ watchAuthState((user) => {
   document.getElementById('profileSignoutBtn').hidden = !user;
   document.getElementById('dashboardGreeting').textContent = user ? `Welcome back, ${user.displayName || user.email}` : 'Welcome — sign in to enable cloud sync';
   renderDashboardCards();
+  collab?.onAuth(user);
 });
 
 document.getElementById('profileSigninBtn').addEventListener('click', () => openSignIn());
@@ -278,6 +281,7 @@ async function refreshProjects() {
   // the open project left this workspace (switched away, or moved elsewhere)
   if (project && !allProjects.some((p) => p.id === project.id)) closeProjectView();
   paintWorkspaceName();
+  collab?.projectsChanged();
   renderProjectsGrid();
   renderPanelProjects();
   renderDashboardCards();
@@ -516,13 +520,16 @@ function projectMenu(p) {
   const others = workspaces.filter((w) => w.id !== wsOf(p));
   return [
     { label: 'Open', onClick: () => openProjectView(p) },
+    p.cloudEnabled
+      ? { label: 'Share…', onClick: () => collab.openShare(p.id) }
+      : { label: 'Share… (turn on cloud sync first)', onClick: () => openProjectModal('edit', p) },
     { label: 'Edit…', onClick: () => openProjectModal('edit', p) },
     '-',
     ...(others.length
       ? others.map((w) => ({ label: `Move to ${w.name}`, onClick: () => moveProjectToWorkspace(p, w.id) }))
       : [{ label: 'Move to… (create another workspace first)', disabled: true, onClick: () => {} }]),
     '-',
-    { label: 'Delete…', danger: true, onClick: () => openDeleteModal(p) }
+    { label: p.joined ? 'Remove from this computer…' : 'Delete…', danger: true, onClick: () => openDeleteModal(p) }
   ];
 }
 
@@ -555,6 +562,7 @@ function openProjectModal(mode, existing) {
     chosenFolder = existing.folderPath;
     folderPathEl.textContent = existing.folderPath;
     cloudToggle.checked = existing.cloudEnabled;
+    cloudToggle.disabled = !!existing.joined;
   } else {
     projectTitle.textContent = 'New project';
     projectSubmit.textContent = 'Create';
@@ -632,7 +640,7 @@ const deleteFolderField = document.getElementById('delete-folder-field');
 const deleteFolderToggle = document.getElementById('delete-folder-toggle');
 
 function selectedDeleteScope() {
-  return deletingProject.cloudEnabled
+  return deletingProject.cloudEnabled && !deletingProject.joined
     ? deleteModal.querySelector('input[name="delete-scope"]:checked').value
     : 'local';
 }
@@ -650,8 +658,11 @@ function syncDeleteFolderOption() {
 function openDeleteModal(p) {
   deletingProject = p;
   deleteError.textContent = '';
-  deleteChoices.hidden = !p.cloudEnabled;
-  deleteModalSub.hidden = p.cloudEnabled;
+  deleteChoices.hidden = !p.cloudEnabled || !!p.joined;
+  deleteModalSub.hidden = p.cloudEnabled && !p.joined;
+  deleteModalSub.textContent = p.joined
+    ? "Removes it from MulTeam on this computer. You stay a member of the shared project (leave it from Share). Your files stay on disk unless you choose otherwise below."
+    : 'Removes it from MulTeam. Your files stay on disk unless you choose otherwise below.';
   deleteModal.querySelector('input[name="delete-scope"][value="local"]').checked = true;
   deleteFolderToggle.checked = false;
   document.getElementById('delete-folder-path').textContent = p.folderPath;
@@ -1114,8 +1125,9 @@ async function openDoc(filePath) {
     const cloud = !!project?.cloudEnabled;
     const fileKey = fileKeyFor(rel);
     const docId = `${project.id}__${fileKey}`;
+    let role = null;
     if (cloud) {
-      try { await ensureLiveMembership(project.id, currentUser.uid); } catch (err) { console.warn('[cloud] membership check failed:', err?.message || err); }
+      try { role = await ensureLiveMembership(project.id, currentUser.uid); } catch (err) { console.warn('[cloud] membership check failed:', err?.message || err); }
     }
     const doc = new FileDocument(filePath, {
       live: cloud ? { projectId: project.id, fileKey } : null,
@@ -1123,6 +1135,11 @@ async function openDoc(filePath) {
       collaborative: cloud,
       onDenied: () => toast(`Live editing isn't available for ${rel}. You may not be a member of this project, or you're offline. Edits stay local.`, 'error')
     }).init(content);
+    doc.readOnly = role === 'viewer';
+    if (cloud) {
+      const live = await doc.ready; // the shared text is in before anyone can type
+      if (!live && role && role !== 'viewer') toast(`Couldn't reach the live session for ${rel}. Editing your local copy; it joins the session when reopened.`, 'error');
+    }
     rec.doc = doc;
     rec.opening = null;
     rec.sub = doc.model.onDidChangeContent(() => {
@@ -1132,7 +1149,7 @@ async function openDoc(filePath) {
       rec.saveTimer = setTimeout(() => saveActiveFile(doc.filePath), 800);
     });
     if (project?.cloudEnabled) {
-      upsertDocumentMeta(docId, { projectId: project.id, ownerId: currentUser.uid, path: rel, language: doc.model.getLanguageId(), userId: currentUser.uid });
+      upsertDocumentMeta(docId, { projectId: project.id, path: rel, language: doc.model.getLanguageId(), userId: currentUser.uid }).catch(() => {});
     }
     return doc;
   })();
@@ -1231,6 +1248,7 @@ async function showInGroup(g, filePath) {
 
   g.editorEl.innerHTML = '';
   g.view = new EditorView(g.editorEl, doc, getEffectiveTheme());
+  if (doc.readOnly) g.view.editor.updateOptions({ readOnly: true, readOnlyMessage: { value: "You're a viewer in this project, so you can watch and follow but not edit." } });
   g.view.editor.onDidFocusEditorWidget(() => focusGroup(g));
   g.crumbs.setEditor(g.view.editor, filePath);
   if (focusedGroup === g) syncActive();
@@ -2132,6 +2150,8 @@ const palette = initCommandPalette({
     { label: 'New project', action: () => openProjectModal('create', null) },
     { label: 'Workspaces: Switch Workspace…', action: () => setTimeout(pickWorkspace, 0) },
     { label: 'Workspaces: New Workspace…', action: () => setTimeout(newWorkspace, 0) },
+    { label: 'Share Project…', action: () => setTimeout(() => (project?.cloudEnabled ? collab.openShare(project.id) : toast('Open a cloud project first (turn on cloud sync in Edit project)', 'error')), 0) },
+    { label: 'Join Project…', action: () => setTimeout(() => collab.openJoin(), 0) },
     { label: 'Toggle theme', action: () => applyTheme(getEffectiveTheme() === 'dark' ? 'light' : 'dark', { user: true }) },
     { label: 'Open settings', action: () => openSettings() },
     { label: 'Toggle panel', hint: 'Ctrl+J', action: () => toggleProblems() },
@@ -2327,6 +2347,9 @@ initMenubar(document.getElementById('menubar'), [
     { label: 'Open Project…', kbd: 'Ctrl+K', run: openPalette },
     { label: 'Switch Workspace…', run: () => pickWorkspace(), enabled: () => workspaces.length > 1 },
     '-',
+    { label: 'Share Project…', run: () => collab.openShare(project.id), enabled: () => !!project?.cloudEnabled },
+    { label: 'Join Project…', run: () => collab.openJoin() },
+    '-',
     { label: 'Save', kbd: 'Ctrl+S', run: () => saveActiveFile(activeTabPath, { explicit: true }), enabled: hasEditor },
     { label: 'Save As…', run: () => saveFileAs(activeTabPath), enabled: hasEditor },
     '-',
@@ -2449,6 +2472,30 @@ const extensions = initExtensions({
 });
 
 const formatting = initFormatting({ toast, confirmDialog, getRoot: () => rootFolder });
+
+collab = initCollab({
+  toast,
+  confirmDialog,
+  escapeHtml,
+  requireAuth,
+  getUser: () => currentUser,
+  getLocalProjects: () => everyProject,
+  refreshProjects,
+  openProjectById: async (id) => {
+    let p = everyProject.find((x) => x.id === id);
+    if (p && wsOf(p) !== currentWsId) { await switchWorkspace(wsOf(p)); p = allProjects.find((x) => x.id === id); }
+    if (p) openProjectView(p);
+  },
+  chooseFolder: () => window.electronAPI.openDirectory(),
+  createLocalProject: (o) => window.electronAPI.createProject({ ...o, workspaceId: currentWsId }),
+  removeLocalProject: async (id) => {
+    if (project?.id === id) closeProjectView();
+    await window.electronAPI.deleteProjectLocal(id);
+    await refreshProjects();
+  }
+});
+collab.onAuth(currentUser);
+document.getElementById('joinProjectBtn').addEventListener('click', () => collab.openJoin());
 
 
 

@@ -1005,3 +1005,47 @@ select.pill.sm { padding: 2px 8px; font-size: 11px; }
 .pdev__line.is-info .pdev__lvl { color: var(--violet-500); }
 .pdev .linkbtn { font-family: inherit; font-size: inherit; }
 @media (max-width: 900px) { .pdev__cols { grid-template-columns: 1fr; } }
+
+/* ===== collaboration: share / join / invites / shared with you ===== */
+button.primary.sm, button.secondary.sm { width: auto; height: 26px; padding: 0 10px; font-size: 11.5px; border-radius: var(--r-pill); white-space: nowrap; }
+button.secondary.danger-text { color: var(--danger); width: auto; }
+.modal-actions .spacer { flex: 1; }
+.check-inline { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); white-space: nowrap; }
+.modal-card.share { width: 620px; max-height: calc(100vh - 80px); display: flex; flex-direction: column; }
+.share__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.share__head h2 { margin-bottom: 2px; overflow-wrap: anywhere; }
+.share__body { flex: 1; min-height: 0; overflow: auto; margin: 6px -6px 0; padding: 0 6px; }
+.share__sec { padding: 12px 0; border-top: 1px solid var(--line); }
+.share__sec:first-child { border-top: 0; }
+.share__sec h3 { font-size: 12px; font-weight: 600; margin-bottom: 8px; color: var(--text); }
+.share__sec h3 .muted { font-weight: 400; }
+.share__row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.share__row input[type="email"] { flex: 1; min-width: 180px; }
+.share__list { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+.share__item { display: flex; align-items: center; gap: 10px; padding: 6px 4px; border-radius: var(--r-sm); }
+.share__item:hover { background: var(--fill); }
+.share__av { width: 26px; height: 26px; flex-shrink: 0; border-radius: 50%; display: grid; place-items: center; overflow: hidden; background: var(--violet-500); color: #fff; font-size: 11px; font-weight: 600; }
+.share__av img { width: 100%; height: 100%; object-fit: cover; }
+.share__av.is-pending { background: var(--fill-2); color: var(--muted); border: 1px dashed var(--line); }
+.share__who { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+.share__who b { font-size: 12.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.share__who small { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.share__role { font-size: 11.5px; color: var(--text-2); padding: 0 6px; }
+.share__code { font-family: var(--mono, ui-monospace, monospace); font-size: 12.5px; letter-spacing: .06em; padding: 3px 8px; border-radius: var(--r-sm); background: var(--fill-2); color: var(--text); }
+.share__item .ibtn { width: 24px; height: 24px; flex-shrink: 0; }
+.share__item .ibtn svg { width: 13px; height: 13px; }
+.join__preview { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; margin-bottom: 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--fill); font-size: 12.5px; color: var(--text-2); }
+.join__preview > b { font-size: 13.5px; color: var(--text); }
+.invites { padding: 4px; display: flex; flex-direction: column; gap: 4px; border-bottom: 1px solid var(--line); }
+.invite { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: var(--r-sm); background: color-mix(in srgb, var(--violet-500) 8%, transparent); font-size: 12.5px; color: var(--text); }
+.invite.is-note { background: var(--fill); color: var(--text-2); }
+.invite__acts { display: flex; gap: 6px; justify-content: flex-end; }
+.shared { margin-top: 22px; }
+.shared__head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.shared__head h3 { font-size: 14px; }
+.shared__list { display: flex; flex-direction: column; gap: 4px; }
+.shared__item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); }
+@media (max-width: 640px) {
+  .share__item { flex-wrap: wrap; }
+  .shared__item { flex-wrap: wrap; }
+}

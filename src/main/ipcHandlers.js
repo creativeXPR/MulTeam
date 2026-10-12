@@ -10,6 +10,7 @@ const { setupPluginHandlers } = require('./plugins');
 const { setupLanguageHandlers } = require('./languages');
 const { setupToolHandlers } = require('./tools');
 const { setupRunHandlers } = require('./runner');
+const { setupLinkHandlers } = require('./links');
 const { titleBarOverlayFor, setCustomOverlay, zoom } = require('./window');
 
 function registerIpcHandlers(ipcMain) {
@@ -39,6 +40,7 @@ function registerIpcHandlers(ipcMain) {
   setupLanguageHandlers(ipcMain, IPC);
   setupToolHandlers(ipcMain, IPC);
   setupRunHandlers(ipcMain, IPC);
+  setupLinkHandlers(ipcMain);
 }
 
 module.exports = { registerIpcHandlers };
