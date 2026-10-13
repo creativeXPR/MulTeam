@@ -264,6 +264,132 @@
 
 
           <!-- ===== PLUGIN TUTORIAL ===== -->
+          <!-- ===== HELP VIEW (Help menu, ? in the sidebar) ===== -->
+          <section class="view scroll tutorial help" id="view-help" hidden>
+            <header class="vhead">
+              <div>
+                <h2>Help</h2>
+                <p>MulTeam is a local-first code editor with optional real-time collaboration.</p>
+              </div>
+              <div class="vhead__acts">
+                <label class="help__search">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" width="14" height="14"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+                  <input type="search" id="helpSearch" placeholder="Search help" autocomplete="off" spellcheck="false" />
+                </label>
+                <button class="pillbtn" data-nav="tutorial">Plugin tutorial</button>
+              </div>
+            </header>
+
+            <nav class="tutorial__toc">
+              <a href="#h-start">Getting started</a><a href="#h-edit">Editing</a><a href="#h-run">Run</a>
+              <a href="#h-collab">Collaborate</a><a href="#h-git">Source Control</a><a href="#h-custom">Customize</a>
+              <a href="#h-panels">Panels &amp; terminal</a><a href="#h-keys">Keyboard shortcuts</a>
+            </nav>
+
+            <article class="tutorial__body help__body">
+              <p class="help__empty" id="helpEmpty" hidden>No help topics match your search.</p>
+
+              <section class="help__sec">
+                <h3 id="h-start">Getting started</h3>
+                <ul>
+                  <li><b>New project</b>: pick a name and a folder. Nothing touches the cloud unless you turn on cloud sync.</li>
+                  <li><b>Workspaces</b>: group projects into workspaces with the ⇅ button in the Explorer header or the Dashboard's workspace button. The Explorer and Dashboard show the current workspace; right-click a project to move it.</li>
+                  <li><b>Switching projects</b>: one project stays open at a time; you're asked to confirm before switching away.</li>
+                  <li><b>Ctrl+K</b>: jump to any project, open file or app command.</li>
+                </ul>
+              </section>
+
+              <section class="help__sec">
+                <h3 id="h-edit">Editing</h3>
+                <ul>
+                  <li><b>Ctrl+P</b>: open any file in the project by typing part of its name (type <b>&gt;</b> for commands).</li>
+                  <li><b>Ctrl+Shift+F</b>: search text across every file in the project; click a result to jump to it.</li>
+                  <li><b>Split editors</b>: drag a tab to reorder it, or onto the left/right/top/bottom of an editor to open it there. <b>Ctrl+\</b> splits right; <b>Ctrl+1–9</b> focuses a group. You can drag files from the Explorer too.</li>
+                  <li><b>Language support</b>: Extensions → Language support → Install (JavaScript/TypeScript, Python, C/C++, PHP, Java, C#). The language server downloads once; then IntelliSense, go to definition (<b>F12</b>) and real errors work. The footer shows its status.</li>
+                  <li><b>Formatting</b>: <b>Shift+Alt+F</b> (Edit → Format Document). Install Prettier or Ruff under Extensions → Formatters &amp; linters; C/C++, Java, PHP and C# use their language server. Turn on <b>Format on save</b> in Settings.</li>
+                  <li><b>Right-click a file</b>: rename, duplicate, save as, reveal, copy its path, or delete it.</li>
+                </ul>
+              </section>
+
+              <section class="help__sec">
+                <h3 id="h-run">Run</h3>
+                <ul>
+                  <li><b>Run a file</b>: the ▷ button above the editor (or <b>Ctrl+F5</b>) runs it in the terminal: JavaScript, TypeScript, Python, PHP, Java, C, C++, C#, Go, Ruby, Rust, Lua, Perl and shell scripts.</li>
+                  <li><b>Missing language</b>: if the interpreter or compiler isn't installed, MulTeam offers to install it (winget) or opens its download page.</li>
+                </ul>
+              </section>
+
+              <section class="help__sec">
+                <h3 id="h-collab">Collaborate</h3>
+                <ul>
+                  <li><b>Cloud sync</b>: turn it on per project (Edit project) to work live with others. You'll be asked to sign in the first time.</li>
+                  <li><b>Share</b>: right-click a cloud project → <b>Share…</b>. Search for any MulTeam user by name, or type an email; create invite links with a role, an expiry and optional approval; change roles or remove people.</li>
+                  <li><b>Join</b>: use <b>Join project</b> on the Dashboard with a code or <code>multeam://join/…</code> link. Invites also appear in the notification bell.</li>
+                  <li><b>Roles</b>: <b>Editors</b> edit; <b>Viewers</b> watch and follow but can't change code.</li>
+                  <li><b>Live branches</b>: each Git branch has its own live session. Switching branch switches session; changes Git makes (checkout, pull) aren't re-shared.</li>
+                  <li><b>Whole-project sync</b>: files with live edits stay in sync on everyone's disk, open or not. Edits, new files, renames and deletes made anywhere are shared; deletes from teammates go to the Recycle Bin, and a differing local copy is backed up first.</li>
+                  <li><b>Projects without Git</b>: synced whole (up to 400 files). <code>.env</code>, <code>node_modules</code> and build output always stay local.</li>
+                </ul>
+              </section>
+
+              <section class="help__sec">
+                <h3 id="h-git">Source Control</h3>
+                <ul>
+                  <li><b>Ctrl+Shift+G</b>: stage, commit, pull and push.</li>
+                  <li><b>Branches</b>: click the branch name in the footer to switch or create one.</li>
+                </ul>
+              </section>
+
+              <section class="help__sec">
+                <h3 id="h-custom">Customize</h3>
+                <ul>
+                  <li><b>Ctrl+Shift+X</b>: Extensions. Install color themes, file icon themes and snippets from Open VSX; switch with <b>View → Color Theme…</b> / <b>File Icon Theme…</b>.</li>
+                  <li><b>Light / Dark</b>: the switch in the title bar or Settings follows your color theme's own light or dark variant.</li>
+                  <li><b>Accent</b>: Settings → Accent. "Auto" follows the color theme.</li>
+                  <li><b>Plugins</b>: the plug icon in the sidebar. Install from the Gallery, start from a Template, or read the <a href="#" data-nav="tutorial">plugin tutorial</a>.</li>
+                  <li><b>Zoom</b>: <b>Ctrl +</b> / <b>Ctrl −</b> zooms the whole app; <b>Ctrl+0</b> resets. Remembered between launches.</li>
+                </ul>
+              </section>
+
+              <section class="help__sec">
+                <h3 id="h-panels">Panels &amp; terminal</h3>
+                <ul>
+                  <li><b>Ctrl+J</b>: show or hide the bottom panel. Click the ⊗ / ⚠ counts in the footer to jump to Problems.</li>
+                  <li><b>Ctrl+`</b>: open the terminal in the project's folder. Use + for more, and pick PowerShell, Command Prompt or Git Bash.</li>
+                  <li><b>Ctrl+B</b>: show or hide the sidebar.</li>
+                </ul>
+              </section>
+
+              <section class="help__sec">
+                <h3 id="h-keys">Keyboard shortcuts</h3>
+                <table class="tutorial__table help__keys">
+                  <thead><tr><th>Keys</th><th>Action</th></tr></thead>
+                  <tbody>
+                    <tr><td><kbd>Ctrl+K</kbd></td><td>Search projects, files and commands</td></tr>
+                    <tr><td><kbd>Ctrl+P</kbd></td><td>Go to file</td></tr>
+                    <tr><td><kbd>Ctrl+Shift+F</kbd></td><td>Find in files</td></tr>
+                    <tr><td><kbd>Ctrl+S</kbd></td><td>Save</td></tr>
+                    <tr><td><kbd>Ctrl+W</kbd></td><td>Close editor</td></tr>
+                    <tr><td><kbd>Ctrl+\</kbd></td><td>Split editor right</td></tr>
+                    <tr><td><kbd>Ctrl+1–9</kbd></td><td>Focus editor group</td></tr>
+                    <tr><td><kbd>Ctrl+F5</kbd></td><td>Run active file</td></tr>
+                    <tr><td><kbd>Shift+Alt+F</kbd></td><td>Format document</td></tr>
+                    <tr><td><kbd>F12</kbd></td><td>Go to definition</td></tr>
+                    <tr><td><kbd>Ctrl+B</kbd></td><td>Toggle sidebar</td></tr>
+                    <tr><td><kbd>Ctrl+J</kbd></td><td>Toggle bottom panel</td></tr>
+                    <tr><td><kbd>Ctrl+`</kbd></td><td>Toggle terminal</td></tr>
+                    <tr><td><kbd>Ctrl+Shift+G</kbd></td><td>Source Control</td></tr>
+                    <tr><td><kbd>Ctrl+Shift+X</kbd></td><td>Extensions</td></tr>
+                    <tr><td><kbd>Ctrl+,</kbd></td><td>Settings</td></tr>
+                    <tr><td><kbd>Ctrl +</kbd> / <kbd>Ctrl −</kbd> / <kbd>Ctrl+0</kbd></td><td>Zoom in / out / reset</td></tr>
+                  </tbody>
+                </table>
+              </section>
+
+              <p class="help-version">MulTeam v1.0 alpha</p>
+            </article>
+          </section>
+
           <section class="view scroll tutorial" id="view-tutorial" hidden>
             <header class="vhead">
               <div>
@@ -705,41 +831,6 @@ multeam.on('save', ({ path }) =&gt; {});</code></pre>
           <button type="button" class="secondary" id="confirm-alt" hidden></button>
           <button type="button" class="primary" id="confirm-ok">Confirm</button>
         </div>
-      </div>
-    </div>
-
-    <div class="modal-overlay" id="help-modal" hidden>
-      <div class="modal-card help-card">
-        <h2>Help</h2>
-        <p class="modal-sub">MulTeam is a local-first code editor with optional real-time collaboration.</p>
-
-        <h4 class="help-heading">How to</h4>
-        <ul class="help-list">
-          <li><b>New project</b> — pick a name and a folder. Nothing touches the cloud unless you turn on cloud sync.</li>
-          <li><b>Cloud sync</b> — turn it on (per-project) to collaborate live with others; you'll be asked to sign in the first time.</li>
-          <li><b>Ctrl+K</b> — jump to any project, open file, or app command.</li>
-          <li><b>Collaborate</b> — turn on cloud sync for a project, then right-click it → <b>Share…</b> to invite people by email or with a link/code (Editor or Viewer). Others use <b>Join project</b> on the Dashboard; invites also show up in the notification bell.</li>
-          <li><b>Workspaces</b> — group projects into workspaces (the ⇅ button in the Explorer header, or the Dashboard's workspace button). The Explorer and Dashboard show the current workspace; right-click a project to move it.</li>
-          <li><b>Run</b> — the ▷ button above the editor (or Ctrl+F5) runs the file in the terminal: JavaScript, TypeScript, Python, PHP, Java, C, C++, C#, Go, Ruby, Rust and more. If the language isn't installed, MulTeam offers to install it.</li>
-          <li><b>Split editors</b> — drag a tab to reorder it, or onto the left/right/top/bottom of an editor to open it there. Ctrl+\ splits right; Ctrl+1–9 focuses a group. Drag files from the Explorer too.</li>
-          <li><b>Ctrl+P</b> — open any file in the project by typing part of its name (type <b>&gt;</b> for commands).</li>
-          <li><b>Ctrl+Shift+F</b> — search text across every file in the project; click a result to jump to it.</li>
-          <li><b>Language support</b> — Extensions view → Language support → Install (JavaScript/TypeScript, Python, C/C++, PHP, Java, C#). Downloads the language server once (Java uses your Java 21+ if you have it; C# needs the .NET SDK); then IntelliSense, go to definition (F12) and real errors work. The footer shows its status.</li>
-          <li><b>Formatting</b> — Shift+Alt+F (Edit → Format Document). Install Prettier / Ruff under Extensions → Formatters &amp; linters; C/C++, Java, PHP and C# use their language server. Turn on <b>Format on save</b> in Settings.</li>
-          <li><b>Ctrl+Shift+X</b> — Extensions: install color themes, file icon themes and snippets from Open VSX. Switch with <b>View → Color Theme…</b> / <b>File Icon Theme…</b>.</li>
-          <li><b>Plugins</b> — the plug icon in the sidebar: install from the Gallery, start from a Template, or read the tutorial (Help → Plugin Tutorial).</li>
-          <li><b>Ctrl+Shift+G</b> — Source Control: stage, commit, pull and push. Click the branch name in the footer to switch or create branches.</li>
-          <li><b>Ctrl+J</b> — show or hide the bottom panel. Click the ⊗ / ⚠ counts in the footer to jump to Problems.</li>
-          <li><b>Ctrl+`</b> — open the terminal in the current project's folder. Use + for more, and pick PowerShell, Command Prompt or Git Bash.</li>
-          <li><b>Ctrl + / Ctrl −</b> — zoom the whole app in or out; <b>Ctrl+0</b> resets. Remembered between launches.</li>
-          <li><b>Right-click a file</b> — rename, duplicate, save as, or delete it.</li>
-          <li><b>Switching projects</b> — only one project stays open at a time; you'll be asked to confirm before switching away from one.</li>
-        </ul>
-
-        <div class="modal-actions">
-          <button type="button" class="secondary" id="help-close">Close</button>
-        </div>
-        <p class="help-version">MulTeam v1.0 alpha</p>
       </div>
     </div>
 

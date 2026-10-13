@@ -38,7 +38,8 @@ applyStoredTheme();
 const views = {
   dashboard: document.getElementById('view-dashboard'),
   editor: document.getElementById('view-editor'),
-  tutorial: document.getElementById('view-tutorial')
+  tutorial: document.getElementById('view-tutorial'),
+  help: document.getElementById('view-help')
 };
 const navBtns = [...document.querySelectorAll('.sidearray .ibtn[data-nav]')];
 
@@ -251,6 +252,7 @@ function go(view) {
   currentView = view;
   Object.entries(views).forEach(([name, el]) => { el.hidden = name !== view; });
   navBtns.forEach((b) => b.classList.toggle('is-on', b.dataset.nav === view));
+  document.querySelector('.sidearray .ibtn[data-action="help"]')?.classList.toggle('is-on', view === 'help');
   if (view === 'dashboard') renderDashboardCards();
   views[view].scrollTop = 0;
 }
@@ -2126,11 +2128,9 @@ document.addEventListener('click', (e) => {
   if (act === 'settings') openSettings();
   if (act === 'newproject') { closeAllOverlays(); openProjectModal('create', null); }
   if (act === 'panel') toggleSidebar();
-  if (act === 'help') { closeAllOverlays(); document.getElementById('help-modal').hidden = false; }
+  if (act === 'help') openHelp();
 });
 
-document.getElementById('help-close').addEventListener('click', () => { document.getElementById('help-modal').hidden = true; });
-document.getElementById('help-modal').addEventListener('click', (e) => { if (e.target === e.currentTarget) e.currentTarget.hidden = true; });
 document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', closeAllOverlays));
 
 document.getElementById('avatarBtn').addEventListener('click', (e) => {
@@ -2415,7 +2415,36 @@ function openSourceControl() {
   setTimeout(() => scm.focusMessage(), 150);
 }
 
-const openHelp = () => { closeAllOverlays(); document.getElementById('help-modal').hidden = false; };
+// Help is a page in the main area (like the plugin tutorial), with a filter.
+function openHelp({ focusSearch = false } = {}) {
+  closeAllOverlays();
+  go('help');
+  if (focusSearch) document.getElementById('helpSearch').focus();
+}
+document.getElementById('helpSearch').addEventListener('input', (e) => {
+  const q = e.target.value.trim().toLowerCase();
+  let any = false;
+  document.querySelectorAll('#view-help .help__sec').forEach((sec) => {
+    let shown = 0;
+    sec.querySelectorAll('li, tbody tr').forEach((row) => {
+      const hit = !q || row.textContent.toLowerCase().includes(q);
+      row.hidden = !hit;
+      if (hit) shown++;
+    });
+    const titleHit = q && sec.querySelector('h3').textContent.toLowerCase().includes(q);
+    if (titleHit) { sec.querySelectorAll('li, tbody tr').forEach((row) => { row.hidden = false; }); shown = 1; }
+    sec.hidden = !shown;
+    if (shown) any = true;
+  });
+  document.getElementById('helpEmpty').hidden = any;
+  document.querySelector('#view-help .tutorial__toc').hidden = !!q;
+});
+document.getElementById('view-help').addEventListener('click', (e) => {
+  const a = e.target.closest('.tutorial__toc a');
+  if (!a) return;
+  e.preventDefault();
+  document.querySelector(a.getAttribute('href'))?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
 const openPalette = () => { closeAllOverlays(); palette.open('all'); };
 
 initMenubar(document.getElementById('menubar'), [
@@ -2526,8 +2555,8 @@ initMenubar(document.getElementById('menubar'), [
     { label: 'Run Active File', kbd: 'Ctrl+F5', run: () => runFile(), enabled: () => isRunnable(activeTabPath) }
   ] },
   { label: 'Help', items: [
-    { label: 'Show Help', run: openHelp },
-    { label: 'Keyboard Shortcuts', run: openHelp },
+    { label: 'Show Help', run: () => openHelp() },
+    { label: 'Keyboard Shortcuts', run: () => { openHelp(); document.getElementById('h-keys').scrollIntoView({ block: 'start' }); } },
     { label: 'Plugin Tutorial', run: () => go('tutorial') },
     '-',
     { label: 'About MulTeam', run: async () => toast(`MulTeam v${await window.electronAPI.getAppVersion()} · Electron, Monaco, Yjs & Firebase`) }
