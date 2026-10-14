@@ -1082,3 +1082,13 @@ button.primary:disabled:has(.btn-spinner) { background: var(--violet-500); }
 .help__body kbd { font: 11.5px var(--mono); padding: 1px 6px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; background: var(--fill); color: var(--text); }
 .help .help-version { margin-top: 28px; font-size: 11.5px; color: var(--muted); }
 @media (max-width: 640px) { .help__search { min-width: 0; flex: 1; } }
+
+/* ===== GitHub connect + clone ===== */
+.gh-card { width: 400px; }
+.gh-steps { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 4px; }
+.gh-step { font-size: 12px; color: var(--muted); margin: 0; }
+.gh-code { font: 600 26px var(--mono); letter-spacing: .12em; text-align: center; padding: 12px; border: 1px dashed var(--line); border-radius: var(--r); color: var(--text); background: var(--fill); user-select: all; }
+.gh-wait { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); margin: 4px 0 0; }
+.gh-note { margin-top: 12px; }
+.gh-avatar { width: 22px; height: 22px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
+.clone__line { display: flex; align-items: center; gap: 8px; font: 12px var(--mono); color: var(--text-2); margin: 8px 0 0; min-height: 18px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

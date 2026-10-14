@@ -126,6 +126,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onAuthPopupClosed: (cb) => { const h = () => cb(); ipcRenderer.on(IPC.AUTH_POPUP_CLOSED, h); return () => ipcRenderer.removeListener(IPC.AUTH_POPUP_CLOSED, h); },
   onOpenLink: (cb) => { const h = (_e, url) => cb(url); ipcRenderer.on(IPC.APP_OPEN_LINK, h); return () => ipcRenderer.removeListener(IPC.APP_OPEN_LINK, h); },
 
+  // Sign in with GitHub (main/github.js) — the token never reaches the page
+  github: {
+    status: () => ipcRenderer.invoke(IPC.GITHUB_STATUS),
+    start: () => ipcRenderer.invoke(IPC.GITHUB_START),
+    finish: (flowId) => ipcRenderer.invoke(IPC.GITHUB_FINISH, flowId),
+    cancel: () => ipcRenderer.invoke(IPC.GITHUB_CANCEL),
+    disconnect: () => ipcRenderer.invoke(IPC.GITHUB_DISCONNECT),
+    openVerify: () => ipcRenderer.invoke(IPC.GITHUB_OPEN_VERIFY),
+    clone: (opts) => ipcRenderer.invoke(IPC.GITHUB_CLONE, opts),
+    onCloneProgress: (cb) => { const h = (_e, line) => cb(line); ipcRenderer.on(IPC.GITHUB_CLONE_PROGRESS, h); return () => ipcRenderer.removeListener(IPC.GITHUB_CLONE_PROGRESS, h); }
+  },
+
   // Run the active file in the terminal (main/runner.js)
   run: {
     extensions: () => ipcRenderer.invoke(IPC.RUN_EXTENSIONS),

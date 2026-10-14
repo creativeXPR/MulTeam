@@ -5,7 +5,7 @@
 import {
   cloudCalls, watchCloudProject, watchMyCloudProjects, inviteByEmail, watchProjectInvites, revokeInvite,
   createInviteLink, watchInviteLinks, revokeInviteLink, watchJoinRequests, watchMyInvites, formatCode,
-  resendVerification, refreshUser, forgetLiveMembership, listMyPastInvites
+  resendVerification, refreshUser, forgetLiveMembership, listMyPastInvites, getCloudProject
 } from './firebase.js';
 import { enhanceSelects } from './select.js';
 
@@ -18,7 +18,7 @@ const codeFrom = (text) => {
 };
 const initialOf = (s) => (String(s || '?').trim()[0] || '?').toUpperCase();
 
-export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireAuth, getLocalProjects, refreshProjects, openProjectById, chooseFolder, createLocalProject, removeLocalProject }) {
+export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireAuth, getLocalProjects, refreshProjects, openProjectById, chooseFolder, createLocalProject, removeLocalProject, github }) {
   const esc = escapeHtml;
   const cleanErr = (err) => String(err?.message || err).replace(/^(FirebaseError: )?/, '');
 
@@ -74,6 +74,14 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
           <span class="spacer"></span>
           <button type="button" class="primary" id="share-done">Done</button>
         </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="clone-modal" hidden>
+      <div class="modal-card">
+        <h2 id="clone-title">Cloning…</h2>
+        <p class="modal-sub" id="clone-repo"></p>
+        <p class="clone__line"><span class="btn-spinner" aria-hidden="true"></span><span id="clone-line">Starting…</span></p>
       </div>
     </div>
 
@@ -136,7 +144,8 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
         const myRole = p.members?.[me.uid]?.role;
         const owner = myRole === 'owner';
         $('share-title').textContent = `Share “${p.name}”`;
-        $('share-sub').textContent = owner ? 'You own this project.' : `You're ${myRole === 'editor' ? 'an editor' : 'a viewer'} here.`;
+        const repo = p.repoUrl ? ` · Repository: ${p.repoUrl.replace(/^https:\/\//, '')}` : '';
+        $('share-sub').textContent = (owner ? 'You own this project.' : `You're ${myRole === 'editor' ? 'an editor' : 'a viewer'} here.`) + repo;
         shareModal.querySelectorAll('[data-owner-only]').forEach((el) => { if (el.id !== 'share-requests-sec') el.hidden = !owner; });
         $('share-leave').hidden = owner || !myRole;
         renderMembers(p, owner, me.uid);
@@ -484,19 +493,68 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
   async function setUpLocally({ id, name, repoUrl }) {
     const local = getLocalProjects().find((p) => p.id === id);
     if (local) { openProjectById(id); return; }
-    const ok = await confirmDialog({
-      title: `Set up “${name}” on this computer`,
-      message: `Choose the folder that holds this project's code${repoUrl ? ` (your clone of ${repoUrl})` : ' (for example your clone of its Git repository)'}. MulTeam links it to the shared project so you can edit together.`,
-      confirmLabel: 'Choose folder…'
-    });
-    if (!ok) return;
-    const folder = await chooseFolder();
+    if (repoUrl === undefined) repoUrl = (await getCloudProject(id))?.repoUrl || '';
+    let folder = null;
+    if (repoUrl) {
+      // Git project: clone it (recommended) or point at an existing clone
+      const choice = await confirmDialog({
+        title: `Set up “${name}” on this computer`,
+        message: `This project's code is in ${repoUrl.replace(/^https:\/\//, '')}. Clone it into a folder, or choose a folder where you've already cloned it.`,
+        confirmLabel: 'Clone into a folder…',
+        altLabel: 'Use an existing folder…'
+      });
+      if (!choice) return;
+      if (choice === 'alt') folder = await chooseFolder();
+      else folder = await cloneRepo(repoUrl);
+    } else {
+      const ok = await confirmDialog({
+        title: `Set up “${name}” on this computer`,
+        message: 'Choose a folder for this project (an empty one is fine). MulTeam fills it with the shared files and keeps them in sync.',
+        confirmLabel: 'Choose folder…'
+      });
+      if (!ok) return;
+      folder = await chooseFolder();
+    }
     if (!folder) return;
     try {
       await createLocalProject({ id, name, folderPath: folder, cloudEnabled: true, joined: true });
       await refreshProjects();
       openProjectById(id);
     } catch (err) { toast(cleanErr(err), 'error'); }
+  }
+
+  // Pick where to clone, then clone with progress. A private GitHub repo
+  // without a login asks to connect GitHub, then retries.
+  async function cloneRepo(repoUrl) {
+    const parent = await chooseFolder();
+    if (!parent) return null;
+    const cloneModal = $('clone-modal');
+    const isGitHub = /^https:\/\/github\.com\//i.test(repoUrl);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      $('clone-title').textContent = 'Cloning…';
+      $('clone-repo').textContent = `${repoUrl.replace(/^https:\/\//, '')} → ${parent}`;
+      $('clone-line').textContent = 'Starting…';
+      cloneModal.hidden = false;
+      const off = window.electronAPI.github.onCloneProgress((line) => { $('clone-line').textContent = line; });
+      try {
+        const dest = await window.electronAPI.github.clone({ url: repoUrl, parentDir: parent });
+        toast(`Cloned into ${dest}`);
+        return dest;
+      } catch (err) {
+        const msg = cleanErr(err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+        cloneModal.hidden = true;
+        if (attempt === 0 && isGitHub && /needs a GitHub login/i.test(msg) && github && !github.status().connected) {
+          if (await github.connect('This repository is private. Connect GitHub so MulTeam can clone it with your access.')) continue;
+          return null;
+        }
+        toast(msg, 'error');
+        return null;
+      } finally {
+        off();
+        cloneModal.hidden = true;
+      }
+    }
+    return null;
   }
 
   // multeam://join/CODE

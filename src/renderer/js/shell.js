@@ -1,6 +1,7 @@
-import { watchAuthState, watchCloudConnection, signOut, createCloudProject, deleteCloudProject, upsertDocumentMeta, ensureLiveMembership } from './firebase.js';
+import { watchAuthState, watchCloudConnection, signOut, createCloudProject, deleteCloudProject, upsertDocumentMeta, ensureLiveMembership, getCloudProject, setProjectRepo } from './firebase.js';
 import { fileKeyFor } from './sync.js';
 import { initCollab } from './collab.js';
+import { initGitHubAccount } from './githubAccount.js';
 import { createLiveProject } from './liveProject.js';
 import { requireAuth, openSignIn } from './authModal.js';
 import { FileDocument, EditorView, setMonacoTheme } from './editor.js';
@@ -733,6 +734,10 @@ function startLiveSync() {
     const st = await window.electronAPI.git.status(root).catch(() => ({ isRepo: false }));
     if (project !== p) return null;
     liveRole = role;
+    // the owner keeps the cloud project's repository in step with origin
+    if (role === 'owner' && st.isRepo && st.remoteUrl) {
+      getCloudProject(p.id).then((cp) => { if (cp && cp.repoUrl !== st.remoteUrl) setProjectRepo(p.id, st.remoteUrl).catch(() => {}); });
+    }
     const api = window.electronAPI;
     liveSync = createLiveProject({
       projectId: p.id,
@@ -2583,7 +2588,10 @@ const extensions = initExtensions({
 
 const formatting = initFormatting({ toast, confirmDialog, getRoot: () => rootFolder });
 
+const github = initGitHubAccount({ toast, escapeHtml });
+
 collab = initCollab({
+  github,
   toast,
   confirmDialog,
   escapeHtml,

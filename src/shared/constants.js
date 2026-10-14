@@ -93,7 +93,15 @@ const IPC = Object.freeze({
   RUN_OPEN_DOWNLOAD: 'run:openDownload',
   APP_OPEN_LINK: 'app:openLink',
   APP_TAKE_LINK: 'app:takeLink',
-  AUTH_POPUP_CLOSED: 'auth:popupClosed'
+  AUTH_POPUP_CLOSED: 'auth:popupClosed',
+  GITHUB_STATUS: 'github:status',
+  GITHUB_START: 'github:start',
+  GITHUB_FINISH: 'github:finish',
+  GITHUB_CANCEL: 'github:cancel',
+  GITHUB_DISCONNECT: 'github:disconnect',
+  GITHUB_OPEN_VERIFY: 'github:openVerify',
+  GITHUB_CLONE: 'github:clone',
+  GITHUB_CLONE_PROGRESS: 'github:cloneProgress'
 });
 
 const ROLES = Object.freeze({

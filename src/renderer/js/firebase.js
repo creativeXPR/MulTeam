@@ -199,6 +199,12 @@ export async function getCloudProject(projectId) {
   } catch { return null; }
 }
 
+// Owner only (rules): the project's Git repository, shown to members and
+// used when they set the project up (clone).
+export async function setProjectRepo(projectId, repoUrl) {
+  await updateDoc(projectDoc(projectId), { repoUrl: String(repoUrl || '').slice(0, 300), updatedAt: serverTimestamp() });
+}
+
 export function watchCloudProject(projectId, cb) {
   return onSnapshot(projectDoc(projectId), (snap) => cb(snap.exists() ? { id: snap.id, ...snap.data() } : null), () => cb(null));
 }

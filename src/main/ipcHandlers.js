@@ -11,6 +11,7 @@ const { setupLanguageHandlers } = require('./languages');
 const { setupToolHandlers } = require('./tools');
 const { setupRunHandlers } = require('./runner');
 const { setupLinkHandlers } = require('./links');
+const { setupGitHubHandlers } = require('./github');
 const { titleBarOverlayFor, setCustomOverlay, zoom } = require('./window');
 
 function registerIpcHandlers(ipcMain) {
@@ -41,6 +42,7 @@ function registerIpcHandlers(ipcMain) {
   setupToolHandlers(ipcMain, IPC);
   setupRunHandlers(ipcMain, IPC);
   setupLinkHandlers(ipcMain);
+  setupGitHubHandlers(ipcMain, IPC);
 }
 
 module.exports = { registerIpcHandlers };

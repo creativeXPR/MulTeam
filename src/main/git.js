@@ -4,6 +4,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { simpleGit } = require('simple-git');
+const { gitEnv, isGitHubHttps, normalizeRepoUrl } = require('./github');
 
 function git(root) {
   if (!root || !fs.existsSync(root)) throw new Error('Project folder not found.');
@@ -20,6 +21,25 @@ async function wrap(fn) {
   try { return await fn(); } catch (err) { throw clean(err); }
 }
 
+// For commands that talk to a remote: a GitHub https remote gets the
+// MulTeam GitHub login (if connected); git never prompts in the background.
+async function remoteGit(root) {
+  const g = git(root);
+  let remotes = [];
+  try { remotes = await g.getRemotes(true); } catch { /* none */ }
+  const usesGitHub = remotes.some((r) => isGitHubHttps(r.refs?.fetch) || isGitHubHttps(r.refs?.push));
+  g.env({ ...process.env, ...(usesGitHub ? await gitEnv() : { GIT_TERMINAL_PROMPT: '0' }) });
+  return g;
+}
+
+function authHint(err) {
+  const msg = String(err?.message || err);
+  if (/Authentication failed|could not read Username|terminal prompts disabled|403/i.test(msg)) {
+    return new Error('GitHub needs a login for this. Connect GitHub in Settings → Accounts (or check you have access to the repository).');
+  }
+  return err;
+}
+
 async function status(root) {
   const g = git(root);
   let isRepo;
@@ -34,7 +54,8 @@ async function status(root) {
     const s = await g.status();
     const top = await g.revparse(['--show-toplevel']);
     let remotes = [];
-    try { remotes = await g.getRemotes(); } catch { /* none */ }
+    try { remotes = await g.getRemotes(true); } catch { /* none */ }
+    const origin = remotes.find((r) => r.name === 'origin') || remotes[0];
     return {
       isRepo: true,
       repoRoot: path.resolve(top),
@@ -43,6 +64,7 @@ async function status(root) {
       ahead: s.ahead,
       behind: s.behind,
       hasRemote: remotes.length > 0,
+      remoteUrl: origin ? normalizeRepoUrl(origin.refs?.fetch || origin.refs?.push) : '',
       files: s.files.map((f) => ({
         path: f.path,            // relative to repo root, forward slashes
         index: f.index,          // staged status letter (' ' = none, '?' = untracked)
@@ -85,11 +107,13 @@ function setupGitHandlers(ipcMain, IPC) {
     return { commit: r.commit, summary: r.summary };
   }));
   ipcMain.handle(IPC.GIT_PULL, (_e, root) => wrap(async () => {
-    const r = await git(root).pull();
-    return r.summary;
+    try { return (await (await remoteGit(root)).pull()).summary; } catch (err) { throw authHint(err); }
   }));
   ipcMain.handle(IPC.GIT_PUSH, (_e, root) => wrap(async () => {
-    const g = git(root);
+    try { return await push(root); } catch (err) { throw authHint(err); }
+  }));
+  async function push(root) {
+    const g = await remoteGit(root);
     const s = await g.status();
     if (s.tracking) return g.push();
     // first push of a new branch: publish it and set upstream
@@ -97,8 +121,8 @@ function setupGitHandlers(ipcMain, IPC) {
     if (!remotes.length) throw new Error('This repository has no remote to push to.');
     const remote = remotes.find((r) => r.name === 'origin')?.name || remotes[0].name;
     return g.push(['-u', remote, s.current]);
-  }));
-  ipcMain.handle(IPC.GIT_FETCH, (_e, root) => wrap(() => git(root).fetch()));
+  }
+  ipcMain.handle(IPC.GIT_FETCH, (_e, root) => wrap(async () => { try { return await (await remoteGit(root)).fetch(); } catch (err) { throw authHint(err); } }));
   ipcMain.handle(IPC.GIT_BRANCHES, (_e, root) => wrap(async () => {
     const b = await git(root).branchLocal();
     return { current: b.current, all: b.all };
