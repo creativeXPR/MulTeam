@@ -10,6 +10,7 @@ import './monacoEnv.js';
 import { builtinSemanticRules } from './semanticTokens.js';
 import * as monaco from 'monaco-editor';
 import * as Y from 'yjs';
+import { attachRemoteCursors, colorForClient } from './remoteCursors.js';
 import { MonacoBinding } from 'y-monaco';
 import { monacoOptionsFromSettings } from './settings.js';
 
@@ -156,6 +157,7 @@ export class FileDocument {
     this.model = null;
     this.diskText = '';
     this.editors = new Set();
+    this.liveListeners = new Set(); // views waiting for the live binding
   }
 
   init(initialContent = '') {
@@ -196,8 +198,11 @@ export class FileDocument {
     // The editors set is live: views added later get remote cursors too.
     this.binding = new MonacoBinding(this.ydoc.getText('monaco'), this.model, this.editors, this.provider.awareness);
     this.provider.awareness.on('change', this.binding._rerenderDecorations);
+    // who I am, for collaborators' cursor labels (every open file, not just the focused one)
+    const me = this.currentUser;
+    if (me) this.provider.awareness.setLocalStateField('user', { name: me.displayName || me.email || 'Collaborator', color: colorForClient(this.ydoc.clientID) });
     this.binding._rerenderDecorations();
-    this.onLive?.();
+    this.liveListeners.forEach((fn) => fn());
   }
 
   // Called by each EditorView showing this file.
@@ -261,9 +266,18 @@ export class EditorView {
       scrollBeyondLastLine: false,
       renderLineHighlight: 'all',
       'semanticHighlighting.enabled': true, // language-server colors for functions, params, properties…
+      // hovers, suggestions and parameter hints are drawn above the whole
+      // window, so the editor's (split pane's) edges never cut them off
+      fixedOverflowWidgets: true,
       ...monacoOptionsFromSettings()
     });
     doc.attach(this.editor);
+    // collaborators' cursors + name labels (labels can't be clipped by the editor's edges)
+    if (doc.collaborative) {
+      this.cursors = attachRemoteCursors(this.editor, doc);
+      this._onLive = () => this.cursors?.refresh();
+      doc.liveListeners.add(this._onLive);
+    }
   }
 
   get diskText() { return this.doc.diskText; }
@@ -309,6 +323,8 @@ export class EditorView {
 
   // the view only — the document lives on while another group shows it
   destroy() {
+    this.cursors?.dispose();
+    if (this._onLive) this.doc.liveListeners?.delete(this._onLive);
     this.doc.detach(this.editor);
     this.editor.dispose();
   }

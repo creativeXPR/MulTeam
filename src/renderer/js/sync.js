@@ -136,6 +136,9 @@ export class FirebaseProvider {
         if (Number(clientId) === this.doc.clientID) continue;
         try { applyAwarenessUpdate(this.awareness, fromBase64(val[clientId]), this); } catch { /* malformed entry */ }
       }
+      // people whose entry is gone (closed the file, disconnected) leave
+      const gone = [...this.awareness.getStates().keys()].filter((id) => id !== this.doc.clientID && !(String(id) in val));
+      if (gone.length) removeAwarenessStates(this.awareness, gone, this);
     }, fail);
 
     this.doc.on('update', this._onDocUpdate);

@@ -1,8 +1,4 @@
-const AVATAR_COLORS = ['#FF5733', '#33A1FF', '#33FF57', '#F39C12', '#9B59B6', '#1ABC9C'];
-
-function colorForClientId(clientId) {
-  return AVATAR_COLORS[clientId % AVATAR_COLORS.length];
-}
+import { colorForClient as colorForClientId } from './remoteCursors.js';
 
 function initials(name) {
   if (!name) return '?';

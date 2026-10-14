@@ -13,6 +13,7 @@
     "test:live-project": "firebase emulators:exec --project demo-multeam --only database \"node tests/emulator/liveProject.mjs\"",
     "test:live-ui": "firebase emulators:exec --project demo-multeam --only auth,firestore,functions,database \"electron tests/emulator/liveProjectUi.cjs\"",
     "test:github-ui": "firebase emulators:exec --project demo-multeam --only auth,firestore,functions,database \"electron tests/emulator/githubUi.cjs\"",
+    "test:cursors-ui": "firebase emulators:exec --project demo-multeam --only auth,firestore,functions,database \"electron tests/emulator/cursorsUi.cjs\"",
     "test:members": "firebase emulators:exec --project demo-multeam --only auth,firestore,functions,database \"node tests/emulator/members.mjs\"",
     "test:collab-ui": "firebase emulators:exec --project demo-multeam --only auth,firestore,functions,database \"electron tests/emulator/collabUi.cjs\"",
     "icons": "electron build/make-icons.js"

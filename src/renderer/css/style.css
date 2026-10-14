@@ -1092,3 +1092,12 @@ button.primary:disabled:has(.btn-spinner) { background: var(--violet-500); }
 .gh-note { margin-top: 12px; }
 .gh-avatar { width: 22px; height: 22px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
 .clone__line { display: flex; align-items: center; gap: 8px; font: 12px var(--mono); color: var(--text-2); margin: 8px 0 0; min-height: 18px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+/* ===== collaborators' cursors (remoteCursors.js + y-monaco decorations) ===== */
+.monaco-editor .yRemoteSelectionHead { position: absolute; height: 100%; box-sizing: border-box; border-left: 2px solid transparent; margin-left: -1px; pointer-events: none; z-index: 2; }
+.rcursor {
+  padding: 1px 6px; border-radius: 4px 4px 4px 0; color: #fff; font: 600 11px/16px var(--font, system-ui, sans-serif);
+  white-space: nowrap; pointer-events: none; user-select: none; box-shadow: 0 1px 3px #0003;
+  opacity: 0; transform: translateY(2px); transition: opacity .25s, transform .25s; margin-left: -1px;
+}
+.rcursor.is-active { opacity: 1; transform: none; }
