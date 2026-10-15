@@ -18,7 +18,7 @@
 // deletions go to the Recycle Bin; a differing local copy is backed up
 // before a live version first replaces it.
 import * as Y from 'yjs';
-import { ref, child, get, onChildAdded, onChildChanged, set, remove } from 'firebase/database';
+import { ref, child, get, onChildAdded, onChildChanged, onChildRemoved, set, remove } from 'firebase/database';
 import { rtdb } from './firebase.js';
 import { FirebaseProvider, fileKeyFor } from './sync.js';
 
@@ -98,6 +98,28 @@ export function createLiveProject({ projectId, root, branch, isGit, uid, canEdit
   let lastGitSignal = 0;
   let disposed = false;
   const unsubs = [];
+  // Git changed a file that has no live edits: follow it, but don't mark it live
+  const RESET = { reset: true };
+  const sameText = (a, b) => typeof a === 'string' && typeof b === 'string' && a.replace(/\r\n/g, '\n') === b.replace(/\r\n/g, '\n');
+
+  // The text last agreed with the live session, per file. Also kept on disk
+  // (main/liveBase.js) so that after MulTeam was closed or offline, a file
+  // changed here can be merged instead of overwritten.
+  const baseTimers = new Map();
+  function setSynced(rel, text) {
+    lastSynced.set(rel, text);
+    if (typeof text !== 'string' || !api.liveBase) return;
+    clearTimeout(baseTimers.get(rel));
+    baseTimers.set(rel, setTimeout(() => {
+      baseTimers.delete(rel);
+      api.liveBase.set(projectId, branchKey, fileKeyFor(rel), text).catch(() => {});
+    }, 500));
+  }
+  async function storedBase(rel) {
+    if (lastSynced.has(rel)) return lastSynced.get(rel);
+    if (!api.liveBase) return null;
+    try { return await api.liveBase.get(projectId, branchKey, fileKeyFor(rel)); } catch { return null; }
+  }
 
   // ---------- live documents (shared by editors and background sync) ----------
   function acquire(rel, seedText = '') {
@@ -111,7 +133,7 @@ export function createLiveProject({ projectId, root, branch, isGit, uid, canEdit
       d.observer = (_e, tr) => { if (tr.origin === provider) scheduleWrite(rel, d); };
       ytext.observe(d.observer);
       // my changes (typing or a disk edit) → mark the file live on this branch
-      d.onUpdate = (_u, origin) => { if (origin !== provider && !d.markedLive && canEdit) { d.markedLive = true; markLive(rel, 'file'); } };
+      d.onUpdate = (_u, origin) => { if (origin !== provider && origin !== RESET && !d.markedLive && canEdit) { d.markedLive = true; markLive(rel, 'file'); } };
       ydoc.on('update', d.onUpdate);
       docs.set(rel, d);
     }
@@ -147,13 +169,13 @@ export function createLiveProject({ projectId, root, branch, isGit, uid, canEdit
       if (cur !== null && cur !== base && isText(cur)) {
         clearTimeout(diskTimers.get(rel));
         diskTimers.delete(rel);
-        lastSynced.set(rel, cur);
+        setSynced(rel, cur);
         mergeLocalEdit(d.ydoc.getText('monaco'), base, cur, LOCAL);
         text = d.ydoc.getText('monaco').toString();
         if (text === cur) return;
       }
     }
-    lastSynced.set(rel, text);
+    setSynced(rel, text);
     try { await api.writeFile(abs(rel), text); } catch (err) { console.warn('[live] write failed', rel, err?.message || err); }
   }
 
@@ -186,7 +208,7 @@ export function createLiveProject({ projectId, root, branch, isGit, uid, canEdit
     if (e.state === 'deleted') {
       if (e.client === client) return;
       if (backgrounds.has(rel)) { backgrounds.delete(rel); release(rel); }
-      lastSynced.set(rel, null);
+      setSynced(rel, null);
       try { if (await api.trashEntry(abs(rel))) toast?.(`${rel} was deleted by a teammate (moved to the Recycle Bin)`); } catch { /* gone */ }
       return;
     }
@@ -207,19 +229,97 @@ export function createLiveProject({ projectId, root, branch, isGit, uid, canEdit
     await reconcile(rel, d, disk);
   }
 
-  // The live version wins on disk; a local copy that differs (and wasn't
-  // synced by us) is backed up first.
+  // Bring disk and the live doc together when a file joins sync:
+  // - disk unchanged since we were last in sync → take the live version;
+  // - changed here while away (closed/offline) → merge with the team's edits;
+  // - an unknown local copy → back it up, then take the live version.
   async function reconcile(rel, d, disk) {
     const live = await Promise.race([d.provider.firstState, d.provider.noLiveDocYet]);
     if (disposed || !live || !docs.has(rel)) return;
-    const text = d.ydoc.getText('monaco').toString();
-    if (disk !== null && disk !== text && lastSynced.get(rel) !== disk) {
+    const ytext = d.ydoc.getText('monaco');
+    const text = ytext.toString();
+    if (disk === null || disk === text) { await writeDisk(rel, text); return; }
+    const agreed = await storedBase(rel);
+    if (canEdit && typeof agreed === 'string' && disk !== agreed) {
+      mergeLocalEdit(ytext, agreed, disk, LOCAL);
+      setSynced(rel, disk);
+      await writeDisk(rel, ytext.toString());
+      toast?.(`Merged the changes you made to ${rel} while away with the live session`);
+      return;
+    }
+    if (agreed !== disk) {
       try {
         const saved = await api.backupFile(projectId, rel, disk);
         toast?.(`${rel} was updated from the live session. Your previous copy was backed up to ${saved}`);
       } catch { /* best effort */ }
     }
     await writeDisk(rel, text);
+  }
+
+  // ---------- Git: commits retire live files; files without live edits follow Git ----------
+  function dropEntry(rel) {
+    index.delete(rel);
+    const d = docs.get(rel);
+    if (d) d.markedLive = false; // the next edit makes it live again
+    if (backgrounds.has(rel)) { backgrounds.delete(rel); release(rel); }
+  }
+
+  // A live file whose text is now exactly the last commit has nothing
+  // uncommitted left: it leaves the live session (for everyone).
+  async function retireIfClean(rel) {
+    if (!isGit || !canEdit || disposed) return;
+    const e = index.get(rel);
+    if (!e || e.kind !== 'file' || e.state !== 'live') return;
+    const head = await api.headContent(root, rel);
+    if (head === null) return;
+    const d = docs.get(rel);
+    const live = d ? d.ydoc.getText('monaco').toString() : null;
+    let disk = null;
+    try { disk = await api.readFile(abs(rel)); } catch { /* missing */ }
+    if (sameText(disk, head) && (live === null || sameText(live, head))) {
+      dropEntry(rel);
+      remove(child(filesRef, fileKeyFor(rel))).catch(() => {});
+    }
+  }
+
+  // After Git moved HEAD on this branch (commit, pull, reset, stash…):
+  // live edits always win; files without live edits follow Git.
+  let gitMoveTimer = null;
+  async function afterGitMove() {
+    if (disposed) return;
+    if (api.currentBranch) {
+      const now = await api.currentBranch(root).catch(() => branch);
+      if (now !== branch || disposed) return; // a branch switch: a new session takes over
+    }
+    for (const [rel, d] of [...docs]) {
+      let disk = null;
+      try { disk = await api.readFile(abs(rel)); } catch { /* missing */ }
+      const ytext = d.ydoc.getText('monaco');
+      const live = ytext.toString();
+      if (disk === null || !isText(disk) || sameText(disk, live)) continue;
+      if (index.get(rel)?.state === 'live' && canEdit) {
+        setSynced(rel, disk);
+        await writeDisk(rel, live);
+        toast?.(`Git changed ${rel}, but it has live edits from the team, so the live version was kept.`);
+      } else {
+        setSynced(rel, disk);
+        applyTextDiff(ytext, disk, RESET);
+      }
+    }
+    for (const rel of [...index.keys()]) await retireIfClean(rel);
+  }
+
+  // Files changed here while MulTeam was closed (Git projects): share them.
+  async function shareChangedFiles() {
+    let changed;
+    let known;
+    try { changed = await api.changedFiles(root); } catch { return; }
+    try { known = new Map(Object.values((await get(filesRef)).val() || {}).map((e) => [e.path, e])); } catch { return; }
+    for (const rel of changed) {
+      if (disposed) return;
+      if (!isSharedPath(rel) || known.has(rel)) continue;
+      await processDiskChange(rel);
+    }
   }
 
   // ---------- projects without Git: the whole tree is live ----------
@@ -243,7 +343,7 @@ export function createLiveProject({ projectId, root, branch, isGit, uid, canEdit
         let text;
         try { text = await api.readFile(abs(rel)); } catch { continue; }
         if (!isText(text) || backgrounds.has(rel)) continue;
-        lastSynced.set(rel, text);
+        setSynced(rel, text);
         backgrounds.add(rel);
         const d = acquire(rel, text);
         await d.provider.synced;
@@ -259,12 +359,20 @@ export function createLiveProject({ projectId, root, branch, isGit, uid, canEdit
 
   unsubs.push(onChildAdded(filesRef, (snap) => applyEntry(snap.val()), (err) => onDenied?.(err)));
   unsubs.push(onChildChanged(filesRef, (snap) => applyEntry(snap.val())));
-  const treeShared = !isGit && canEdit ? shareWholeTree() : Promise.resolve();
+  unsubs.push(onChildRemoved(filesRef, (snap) => { const e = snap.val(); if (e?.path) dropEntry(e.path); }));
+  const treeShared = !canEdit ? Promise.resolve()
+    : !isGit ? shareWholeTree()
+      : api.changedFiles ? shareChangedFiles() : Promise.resolve();
 
   // ---------- local disk → team ----------
   function onDiskEvent({ filename, git }) {
     if (disposed) return;
-    if (git) { lastGitSignal = Date.now(); return; }
+    if (git) {
+      lastGitSignal = Date.now();
+      clearTimeout(gitMoveTimer);
+      gitMoveTimer = setTimeout(afterGitMove, 1500);
+      return;
+    }
     if (!filename || !canEdit) return;
     const rel = String(filename).split('\\').join('/');
     if (!isSharedPath(rel)) return;
@@ -287,29 +395,38 @@ export function createLiveProject({ projectId, root, branch, isGit, uid, canEdit
     if (text === null) {
       // gone: share the delete only if it was something we knew about
       const known = lastSynced.has(rel) ? lastSynced.get(rel) !== null : index.get(rel)?.state === 'live';
-      lastSynced.set(rel, null);
+      setSynced(rel, null);
       if (!known || gitBusy) return;
       if (backgrounds.has(rel)) { backgrounds.delete(rel); release(rel); }
       await markDeleted(rel);
       return;
     }
     if (!isText(text) || lastSynced.get(rel) === text) return;
-    if (gitBusy) { lastSynced.set(rel, text); return; } // Git wrote it
+    // Right after a Git HEAD move this is probably Git's own write: look again
+    // once Git is quiet. By then afterGitMove has dealt with open files, and a
+    // file that matches the last commit isn't shared (below) — so only real
+    // edits made in that window go out, and none are lost.
+    if (gitBusy) {
+      clearTimeout(diskTimers.get(rel));
+      diskTimers.set(rel, setTimeout(() => { diskTimers.delete(rel); processDiskChange(rel); }, GIT_QUIET_MS));
+      return;
+    }
     const d = docs.get(rel);
     if (d) {
       const base = lastSynced.get(rel);
-      lastSynced.set(rel, text);
+      setSynced(rel, text);
       mergeLocalEdit(d.ydoc.getText('monaco'), base, text, LOCAL);
       // teammates' edits that arrived meanwhile go back to disk too
       if (d.ydoc.getText('monaco').toString() !== text) scheduleWrite(rel, d);
+      if (isGit) setTimeout(() => retireIfClean(rel), 1000);
       return;
     }
     // A file with no live doc yet: unchanged from the last commit = nothing to share
     if (isGit && index.get(rel)?.state !== 'live') {
       const head = await api.headContent(root, rel);
-      if (head === text) { lastSynced.set(rel, text); return; }
+      if (head === text) { setSynced(rel, text); return; }
     }
-    lastSynced.set(rel, text);
+    setSynced(rel, text);
     backgrounds.add(rel);
     const nd = acquire(rel, text);
     await nd.provider.synced;
@@ -325,12 +442,14 @@ export function createLiveProject({ projectId, root, branch, isGit, uid, canEdit
     acquire,
     release,
     // MulTeam wrote this text itself (save/autosave): not a new external change
-    noteWritten: (rel, text) => lastSynced.set(rel, text),
+    noteWritten: (rel, text) => setSynced(rel, text),
     onDiskEvent,
     isShared: isSharedPath,
     treeShared,
     dispose() {
       disposed = true;
+      clearTimeout(gitMoveTimer);
+      for (const t of baseTimers.values()) clearTimeout(t);
       unsubs.forEach((u) => { try { u(); } catch { /* */ } });
       for (const t of diskTimers.values()) clearTimeout(t);
       for (const rel of [...backgrounds]) release(rel);

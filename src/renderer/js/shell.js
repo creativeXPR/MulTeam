@@ -749,7 +749,26 @@ function startLiveSync() {
       api: {
         readFile: api.readFile, writeFile: api.writeFile, readDir: api.readDir, createDirectory: api.createDirectory,
         trashEntry: api.trashEntry, backupFile: api.backupFile, headContent: (r, rel) => api.git.headContent(r, rel),
-        listFiles: api.listFiles
+        listFiles: api.listFiles,
+        liveBase: api.liveBase,
+        currentBranch: async (r) => (await api.git.status(r)).branch,
+        // uncommitted files, relative to the project folder (it may be a subfolder of the repo)
+        changedFiles: async (r) => {
+          const st = await api.git.status(r);
+          if (!st?.isRepo) return [];
+          const prefix = r.slice(st.repoRoot.length).replace(/^[\\/]+/, '').split('\\').join('/');
+          const out = [];
+          for (const f of st.files) {
+            if (prefix && !f.path.startsWith(prefix + '/')) continue;
+            const rel = prefix ? f.path.slice(prefix.length + 1) : f.path;
+            if (rel.endsWith('/')) {
+              // a new folder: everything in it
+              const sub = await api.listFiles(r + '/' + rel).catch(() => ({ files: [] }));
+              for (const x of sub.files) out.push(rel + String(x).split('\\').join('/'));
+            } else out.push(rel);
+          }
+          return out;
+        }
       },
       toast,
       onDenied: () => {

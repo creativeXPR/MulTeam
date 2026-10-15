@@ -115,6 +115,23 @@ export class FirebaseProvider {
     if (this._destroyed) return;
     if (!exists) this._resolveNoLiveDoc(false);
 
+    // Load the snapshot AND every update logged after it before reporting
+    // state: "firstState" must mean the complete text, or a local change
+    // applied on top of a partial doc gets duplicated when the rest arrives.
+    // (The listeners below re-deliver the same items; Yjs ignores repeats.)
+    if (exists) {
+      const [snap, ups] = await Promise.all([get(this.snapshotRef), get(this.updatesRef)]);
+      if (this._destroyed) return;
+      const v = snap.val();
+      if (v?.state) Y.applyUpdate(this.doc, fromBase64(v.state), this);
+      ups.forEach((c) => {
+        const u = c.val();
+        this._appliedKeys.add(c.key);
+        if (u?.state && u.origin !== this.doc.clientID) Y.applyUpdate(this.doc, fromBase64(u.state), this);
+      });
+      if (v?.state || ups.exists()) this._gotState();
+    }
+
     const fail = (err) => this._denied(err);
     onValue(this.snapshotRef, (snap) => {
       const v = snap.val();

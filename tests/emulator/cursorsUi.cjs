@@ -8,6 +8,11 @@ const { pathToFileURL } = require('node:url');
 const { createMainWindow } = require('../../src/main/window');
 const { registerIpcHandlers } = require('../../src/main/ipcHandlers');
 app.disableHardwareAcceleration();
+// Test windows sit in the background; without these, Chromium may stop
+// painting them (Monaco then shows no text even though the model is right).
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 20000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await wait(250); } return false; };
 const TMPF = process.env.TMPF || fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'multeam-cur-'));
@@ -33,6 +38,10 @@ app.whenReady().then(async () => {
 
     Menu.setApplicationMenu(null); registerIpcHandlers(ipcMain);
     const win = await createMainWindow();
+    // keep the test window painting and receiving keystrokes while in the background
+    win.webContents.setBackgroundThrottling(false);
+    win.show();
+    win.focus();
     const errs = [];
     win.webContents.on('console-message', (e, level, msg) => { if (level >= 3 && !/Could not reach Cloud Firestore|PERMISSION_DENIED|permission_denied/.test(msg)) errs.push(String(msg).slice(0, 300)); });
     await wait(4000);

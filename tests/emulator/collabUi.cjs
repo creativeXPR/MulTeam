@@ -15,6 +15,11 @@ const { getFunctions, connectFunctionsEmulator, httpsCallable } = require('fireb
 const { getDatabase, connectDatabaseEmulator, ref, set } = require('firebase/database');
 
 app.disableHardwareAcceleration();
+// Test windows sit in the background; without these, Chromium may stop
+// painting them (Monaco then shows no text even though the model is right).
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await wait(300); } return false; };
 const TMPF = process.env.TMPF || fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'multeam-collab-'));
@@ -41,6 +46,10 @@ app.whenReady().then(async () => {
     await fetch('http://127.0.0.1:9411/.settings/rules.json?ns=demo-multeam', { method: 'PUT', headers: { Authorization: 'Bearer owner' }, body: rules });
     Menu.setApplicationMenu(null); registerIpcHandlers(ipcMain);
     const win = await createMainWindow();
+    // keep the test window painting and receiving keystrokes while in the background
+    win.webContents.setBackgroundThrottling(false);
+    win.show();
+    win.focus();
     const errs = [];
     win.webContents.on('console-message', (e, level, msg) => { if (level >= 3 && !/permission_denied|PERMISSION_DENIED|Permission denied/i.test(msg)) errs.push(String(msg).slice(0, 300)); });
     await wait(4000);
@@ -123,6 +132,11 @@ app.whenReady().then(async () => {
     await js("document.querySelector('.monaco-editor textarea').focus()");
     win.webContents.insertText('HACK '); await wait(800);
     out('viewer editor text:', await js("return document.querySelector('.view-lines').textContent"), '/ disk:', JSON.stringify(fs.readFileSync(path.join(TMPF, 'daves', 'api.js'), 'utf8')));
+    if (!(await js("return document.querySelector('.view-lines').textContent"))) {
+      out('  debug:', await js("const e = document.querySelector('.egroup__editor'); const r = e?.getBoundingClientRect(); const me = document.querySelector('.monaco-editor'); const mr = me?.getBoundingClientRect(); return JSON.stringify({ view: [...document.querySelectorAll('.view')].filter(v => !v.hidden).map(v => v.id), groupEditor: r && [Math.round(r.width), Math.round(r.height)], monaco: mr && [Math.round(mr.width), Math.round(mr.height)], editors: document.querySelectorAll('.monaco-editor').length, lineDivs: document.querySelectorAll('.view-lines > div').length, tabs: [...document.querySelectorAll('.egroup .tab')].map(t => t.textContent.trim() + (t.classList.contains('active') ? '*' : '')), readOnlyMsg: !!document.querySelector('.monaco-editor-overlaymessage'), modals: [...document.querySelectorAll('.modal-overlay')].filter(m => !m.hidden).map(m => m.id) })"));
+      await wait(3000);
+      out('  debug after 3s more:', JSON.stringify(await js("return document.querySelector('.view-lines').textContent")));
+    }
     await shot('viewer.png');
 
     // join modal with a code (dave makes an editor link to a second project)

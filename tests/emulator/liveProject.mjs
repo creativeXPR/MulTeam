@@ -21,7 +21,7 @@ await esbuild.build({
   outfile: path.join(outDir, 'liveProject.mjs'), logLevel: 'error',
   plugins: [{ name: 'stub-firebase', setup(b) { b.onResolve({ filter: /^\.\/firebase\.js$/ }, () => ({ path: path.join(here, 'firebaseStub.js') })); } }]
 });
-const { createLiveProject } = await import(pathToFileURL(path.join(outDir, 'liveProject.mjs')).href);
+const { createLiveProject, fileKeyFor: fileKey } = await import(pathToFileURL(path.join(outDir, 'liveProject.mjs')).href);
 
 const env = await initializeTestEnvironment({
   projectId: 'demo-multeam',
@@ -37,7 +37,7 @@ const until = async (fn, ms = 10000) => { const t = Date.now(); while (Date.now(
 const eq = (a, b, what) => { if (a !== b) throw new Error(`${what}: expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`); };
 
 // A machine: its own folder, fake trash, git HEAD contents, and an engine.
-function machine(uid, { branch = 'main', canEdit = true, head = {}, isGit = true, project = P, seedFiles = {} } = {}) {
+function machine(uid, { branch = 'main', canEdit = true, head = {}, isGit = true, project = P, seedFiles = {}, v24 = false } = {}) {
   const dir = mkdtempSync(path.join(os.tmpdir(), `mt-${uid}-`));
   for (const [rel, text] of Object.entries(seedFiles)) { mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); writeFileSync(path.join(dir, rel), text); }
   const trash = mkdtempSync(path.join(os.tmpdir(), `mt-${uid}-trash-`));
@@ -58,9 +58,21 @@ function machine(uid, { branch = 'main', canEdit = true, head = {}, isGit = true
       return { files, truncated: false };
     }
   };
+  const bases = new Map(); // the agreed-text store (survives engine restarts, like userData)
+  if (v24) {
+    api.liveBase = {
+      get: async (p, b, f) => (bases.has(`${p}/${b}/${f}`) ? bases.get(`${p}/${b}/${f}`) : null),
+      set: async (p, b, f, t) => { bases.set(`${p}/${b}/${f}`, t); return true; },
+      remove: async (p, b, f) => { bases.delete(`${p}/${b}/${f}`); return true; }
+    };
+    api.currentBranch = async () => m.branch;
+    // "git status": files whose text differs from HEAD (untracked included)
+    api.changedFiles = async () => (await api.listFiles(dir)).files.map((f) => f.split(path.sep).join('/')).filter((rel) => readFileSync(path.join(dir, rel), 'utf8') !== head[rel]);
+  }
   const db = env.authenticatedContext(uid).database()._delegate;
   const start = (b = branch) => createLiveProject({ projectId: project, root: dir, branch: b, isGit, uid, canEdit, api, toast: (m) => toasts.push(m), db });
-  const m = { uid, dir, backups, toasts, head, engine: start(), start };
+  const m = { uid, dir, backups, toasts, head, branch, start };
+  m.engine = start();
   m.file = (rel) => path.join(dir, ...rel.split('/'));
   m.read = (rel) => (existsSync(m.file(rel)) ? readFileSync(m.file(rel), 'utf8') : null);
   // write on "disk" and tell the engine, like the folder watcher would
@@ -243,6 +255,100 @@ await check('stress: 5 rounds of simultaneous disk edits keep every edit', async
   eq(ok, true, `converged with all edits (owner=${JSON.stringify(owner.read('race.txt'))}, joiner=${JSON.stringify(joiner.read('race.txt'))})`);
 });
 for (const m of [owner, joiner]) m.engine.dispose();
+
+// ================= offline + Git reconciliation (stage 2.4) =================
+const GP = P + '-git24';
+await env.withSecurityRulesDisabled((ctx) => ctx.database().ref(`projectMembers/${GP}`).set({ alice: 'owner', bob: 'editor' }));
+const g = { project: GP, v24: true };
+const al = machine('alice', g);
+const bo = machine('bob', g);
+await wait(500);
+const idxEntry = async (rel) => (await env.authenticatedContext('alice').database().ref(`projects/${GP}/b/main/files/${fileKey(rel)}`).get()).val();
+
+await check('2.4: edits made while MulTeam was closed are merged on restart', async () => {
+  await al.write('f.txt', 'top\nmiddle\nbottom\n');
+  eq(await until(() => bo.read('f.txt') === 'top\nmiddle\nbottom\n'), true, 'shared');
+  await wait(800); // let the agreed text be stored
+  bo.engine.dispose();
+  writeFileSync(bo.file('f.txt'), 'top\nmiddle\nbottom\nbob offline\n'); // bob edits while closed
+  await al.write('f.txt', 'alice live\ntop\nmiddle\nbottom\n');         // alice edits meanwhile
+  await wait(800);
+  bo.engine = bo.start();
+  const want = 'alice live\ntop\nmiddle\nbottom\nbob offline\n';
+  eq(await until(() => bo.read('f.txt') === want && al.read('f.txt') === want, 12000), true, `merged (bob=${JSON.stringify(bo.read('f.txt'))}, alice=${JSON.stringify(al.read('f.txt'))})`);
+  eq(bo.toasts.some((t) => /Merged the changes you made to f\.txt/.test(t)), true, 'merge notice');
+});
+
+await check('2.4: an unchanged copy just takes the newer live version (no backup)', async () => {
+  await wait(800);
+  bo.engine.dispose();
+  const before = bo.backups.length;
+  await al.write('f.txt', 'v3\n');
+  await wait(800);
+  bo.engine = bo.start();
+  eq(await until(() => bo.read('f.txt') === 'v3\n'), true, 'updated');
+  eq(bo.backups.length, before, 'no backup for an unchanged copy');
+});
+
+await check('2.4: a commit takes the file out of the live session (for both)', async () => {
+  await wait(800);
+  al.head['f.txt'] = 'v3\n'; // alice commits it
+  al.gitSignal();
+  eq(await until(async () => (await idxEntry('f.txt')) === null, 8000), true, 'index entry removed');
+  eq(await until(() => !bo.engine._state().backgrounds.includes('f.txt')), true, 'bob stopped syncing it');
+  eq(bo.read('f.txt'), 'v3\n', "bob's file kept");
+});
+
+await check('2.4: the next edit after a commit makes it live again', async () => {
+  await al.write('f.txt', 'v3\nmore\n');
+  const ok = await until(() => bo.read('f.txt') === 'v3\nmore\n');
+  if (!ok) console.log('DEBUG entry=', JSON.stringify(await idxEntry('f.txt')), ' alice=', JSON.stringify(al.engine._state().docs), JSON.stringify(al.engine._state().backgrounds), ' bob=', JSON.stringify(bo.engine._state().docs), JSON.stringify(bo.engine._state().backgrounds), ' bobdisk=', JSON.stringify(bo.read('f.txt')), ' alicedisk=', JSON.stringify(al.read('f.txt')));
+  eq(ok, true, 'live again');
+});
+
+await check('2.4: a pull updates a teammate’s open file that has no live edits', async () => {
+  writeFileSync(al.file('g.txt'), 'old\n'); writeFileSync(bo.file('g.txt'), 'old\n');
+  al.head['g.txt'] = 'old\n'; bo.head['g.txt'] = 'old\n';
+  const da = al.engine.acquire('g.txt', 'old\n'); // both have it open in an editor
+  const db2 = bo.engine.acquire('g.txt', 'old\n');
+  await Promise.all([da.provider.synced, db2.provider.synced]);
+  await wait(800);
+  // bob pulls a commit that changed g.txt
+  bo.gitSignal(); writeFileSync(bo.file('g.txt'), 'new from pull\n'); bo.head['g.txt'] = 'new from pull\n';
+  eq(await until(() => al.read('g.txt') === 'new from pull\n', 10000), true, "alice's open copy followed");
+  eq(await idxEntry('g.txt'), null, 'not made live');
+  al.engine.release('g.txt'); bo.engine.release('g.txt');
+});
+
+await check('2.4: git stash/reset does not wipe the team’s live edits', async () => {
+  await al.write('h.txt', 'team work\n');
+  await until(() => bo.read('h.txt') === 'team work\n');
+  await wait(800);
+  bo.gitSignal(); rmSync(bo.file('h.txt')); writeFileSync(bo.file('h.txt'), ''); // stash-like: back to "HEAD"
+  eq(await until(() => bo.read('h.txt') === 'team work\n', 10000), true, 'live version restored');
+  eq(bo.toasts.some((t) => /has live edits from the team/.test(t)), true, 'notice');
+  eq(al.read('h.txt'), 'team work\n', "alice's work untouched");
+});
+
+await check('2.4: discarding changes is shared, then the file leaves the live session', async () => {
+  al.head['d.txt'] = 'committed\n'; bo.head['d.txt'] = 'committed\n';
+  writeFileSync(al.file('d.txt'), 'committed\n'); writeFileSync(bo.file('d.txt'), 'committed\n');
+  await al.write('d.txt', 'committed\nexperiment\n');
+  await until(() => bo.read('d.txt') === 'committed\nexperiment\n');
+  await wait(800);
+  await al.write('d.txt', 'committed\n'); // Source Control → Discard
+  eq(await until(() => bo.read('d.txt') === 'committed\n'), true, 'revert shared');
+  eq(await until(async () => (await idxEntry('d.txt')) === null, 8000), true, 'retired');
+});
+
+await check('2.4: a file created while MulTeam was closed is shared at startup', async () => {
+  bo.engine.dispose();
+  writeFileSync(bo.file('offline-new.txt'), 'made offline\n');
+  bo.engine = bo.start();
+  eq(await until(() => al.read('offline-new.txt') === 'made offline\n', 10000), true, 'shared');
+});
+for (const m of [al, bo]) m.engine.dispose();
+
 await env.cleanup();
 const failed = results.filter((r) => r[0] === 'FAIL');
 for (const r of results) console.log(r[0].padEnd(5), r[1], r[2] ? `\n      → ${r[2]}` : '');
