@@ -126,6 +126,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onAuthPopupClosed: (cb) => { const h = () => cb(); ipcRenderer.on(IPC.AUTH_POPUP_CLOSED, h); return () => ipcRenderer.removeListener(IPC.AUTH_POPUP_CLOSED, h); },
   onOpenLink: (cb) => { const h = (_e, url) => cb(url); ipcRenderer.on(IPC.APP_OPEN_LINK, h); return () => ipcRenderer.removeListener(IPC.APP_OPEN_LINK, h); },
 
+  // last-synced text per live file (main/liveBase.js) — offline/restart merges
+  liveBase: {
+    get: (projectId, branchKey, fileKey) => ipcRenderer.invoke(IPC.LIVE_BASE_GET, projectId, branchKey, fileKey),
+    set: (projectId, branchKey, fileKey, text) => ipcRenderer.invoke(IPC.LIVE_BASE_SET, projectId, branchKey, fileKey, text),
+    remove: (projectId, branchKey, fileKey) => ipcRenderer.invoke(IPC.LIVE_BASE_REMOVE, projectId, branchKey, fileKey)
+  },
+
   // Sign in with GitHub (main/github.js) — the token never reaches the page
   github: {
     status: () => ipcRenderer.invoke(IPC.GITHUB_STATUS),

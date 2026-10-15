@@ -101,7 +101,10 @@ const IPC = Object.freeze({
   GITHUB_DISCONNECT: 'github:disconnect',
   GITHUB_OPEN_VERIFY: 'github:openVerify',
   GITHUB_CLONE: 'github:clone',
-  GITHUB_CLONE_PROGRESS: 'github:cloneProgress'
+  GITHUB_CLONE_PROGRESS: 'github:cloneProgress',
+  LIVE_BASE_GET: 'liveBase:get',
+  LIVE_BASE_SET: 'liveBase:set',
+  LIVE_BASE_REMOVE: 'liveBase:remove'
 });
 
 const ROLES = Object.freeze({

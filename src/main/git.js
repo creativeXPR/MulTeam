@@ -23,13 +23,65 @@ async function wrap(fn) {
 
 // For commands that talk to a remote: a GitHub https remote gets the
 // MulTeam GitHub login (if connected); git never prompts in the background.
+// simple-git refuses some environment variables unless allowed explicitly:
+// the GitHub login travels in GIT_CONFIG_*, and people's own SSH/askpass/
+// proxy settings must keep working. Editors/pagers are never needed for
+// remote commands, so they're dropped rather than allowed.
+const REMOTE_UNSAFE = { allowUnsafeConfigEnvCount: true, allowUnsafeSshCommand: true, allowUnsafeAskPass: true, allowUnsafeGitProxy: true };
+// Of the GIT_* variables, remote commands keep only these (anything else —
+// editors, pagers, GIT_DIR overrides… — is dropped, not passed through).
+const KEEP_GIT = /^(GIT_SSH|GIT_SSH_COMMAND|GIT_ASKPASS|GIT_TERMINAL_PROMPT|GIT_PROXY_COMMAND|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+)$/;
+const DROP_OTHER = ['PAGER', 'EDITOR', 'VISUAL'];
+function cleanEnv(extra = {}) {
+  const env = { ...process.env, ...extra };
+  for (const k of Object.keys(env)) {
+    if ((/^GIT_/i.test(k) && !KEEP_GIT.test(k.toUpperCase())) || DROP_OTHER.includes(k.toUpperCase())) delete env[k];
+  }
+  return env;
+}
+const allowedEnv = (env) => Object.keys(env).filter((k) => /^GIT_/i.test(k) || k.toUpperCase() === 'SSH_ASKPASS');
+
 async function remoteGit(root) {
-  const g = git(root);
+  if (!root || !fs.existsSync(root)) throw new Error('Project folder not found.');
   let remotes = [];
-  try { remotes = await g.getRemotes(true); } catch { /* none */ }
+  try { remotes = await git(root).getRemotes(true); } catch { /* none */ }
   const usesGitHub = remotes.some((r) => isGitHubHttps(r.refs?.fetch) || isGitHubHttps(r.refs?.push));
-  g.env({ ...process.env, ...(usesGitHub ? await gitEnv() : { GIT_TERMINAL_PROMPT: '0' }) });
+  const env = cleanEnv(usesGitHub ? await gitEnv() : { GIT_TERMINAL_PROMPT: '0' });
+  const g = simpleGit({ baseDir: root, maxConcurrentProcesses: 4, trimmed: true, unsafe: REMOTE_UNSAFE, allowEnvironment: allowedEnv(env) });
+  g.env(env);
   return g;
+}
+
+// Pull that works with live collaboration: uncommitted changes that are
+// already exactly what the incoming commits bring (typically live edits a
+// teammate has just committed) are set aside first, so git applies them
+// instead of refusing with "your local changes would be overwritten".
+// Anything that really differs is left alone for git to report.
+const sameText = (a, b) => a !== null && b !== null && a.replace(/\r\n/g, '\n') === b.replace(/\r\n/g, '\n');
+async function pullLiveSafe(root) {
+  const g = await remoteGit(root);
+  await g.fetch();
+  const st = await g.status();
+  let setAside = 0;
+  if (st.tracking && st.files.length) {
+    const top = path.resolve(await g.revparse(['--show-toplevel']));
+    const rawEnv = cleanEnv({ GIT_TERMINAL_PROMPT: '0' });
+    const raw = simpleGit({ baseDir: top, trimmed: false, unsafe: REMOTE_UNSAFE, allowEnvironment: allowedEnv(rawEnv) }).env(rawEnv);
+    const incomingChanged = new Set(String(await raw.raw(['diff', '--name-only', 'HEAD', st.tracking])).split(/\r?\n/).filter(Boolean));
+    for (const f of st.files) {
+      if (!incomingChanged.has(f.path)) continue;
+      let incoming = null;
+      let local = null;
+      try { incoming = await raw.show([`${st.tracking}:${f.path}`]); } catch { /* deleted upstream */ }
+      try { local = await fs.promises.readFile(path.join(top, f.path), 'utf8'); } catch { /* deleted here */ }
+      if (!sameText(incoming, local)) continue;
+      if (f.index === '?') await fs.promises.rm(path.join(top, f.path), { force: true });
+      else await raw.raw(['checkout', 'HEAD', '--', f.path]);
+      setAside++;
+    }
+  }
+  const r = await g.pull();
+  return { ...r.summary, setAside };
 }
 
 function authHint(err) {
@@ -107,7 +159,7 @@ function setupGitHandlers(ipcMain, IPC) {
     return { commit: r.commit, summary: r.summary };
   }));
   ipcMain.handle(IPC.GIT_PULL, (_e, root) => wrap(async () => {
-    try { return (await (await remoteGit(root)).pull()).summary; } catch (err) { throw authHint(err); }
+    try { return await pullLiveSafe(root); } catch (err) { throw authHint(err); }
   }));
   ipcMain.handle(IPC.GIT_PUSH, (_e, root) => wrap(async () => {
     try { return await push(root); } catch (err) { throw authHint(err); }
@@ -131,4 +183,4 @@ function setupGitHandlers(ipcMain, IPC) {
   ipcMain.handle(IPC.GIT_CREATE_BRANCH, (_e, root, name) => wrap(() => git(root).checkoutLocalBranch(name)));
 }
 
-module.exports = { setupGitHandlers };
+module.exports = { setupGitHandlers, pullLiveSafe };
