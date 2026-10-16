@@ -23,6 +23,32 @@ service cloud.firestore {
     }
     function myEmail() { return request.auth.token.email.lower(); }
 
+    // Team workspaces: teams/{teamId} with members.{uid}.role
+    // (owner / admin / editor / viewer). Membership changes via functions.
+    function teamData(teamId) {
+      return get(/databases/$(database)/documents/teams/$(teamId)).data;
+    }
+    function teamRole(teamId) {
+      return teamData(teamId).members[request.auth.uid].role;
+    }
+    function isTeamManager(teamId) {
+      return signedIn() && teamRole(teamId) in ['owner', 'admin'];
+    }
+    function isTeamOwner(teamId) {
+      return signedIn() && teamRole(teamId) == 'owner';
+    }
+    // an invite / link targets either a project or a team workspace
+    function targetsProject(d) { return ('projectId' in d) && !('teamId' in d); }
+    function targetsTeam(d) { return ('teamId' in d) && !('projectId' in d); }
+    function canInvite(d) {
+      return (targetsProject(d) && isOwnerOf(d.projectId) && d.role in ['editor', 'viewer'])
+        || (targetsTeam(d) && isTeamManager(d.teamId) && d.role in ['editor', 'viewer'])
+        || (targetsTeam(d) && isTeamOwner(d.teamId) && d.role == 'admin');
+    }
+    function managesTarget(d) {
+      return (('teamId' in d) && isTeamManager(d.teamId)) || (('projectId' in d) && isOwnerOf(d.projectId));
+    }
+
     // Profiles: your own only. Other users are found through the
     // searchUsers function, which returns names/photos but never emails.
     match /users/{userId} {
@@ -61,15 +87,35 @@ service cloud.firestore {
       }
     }
 
+    match /teams/{teamId} {
+      allow read: if signedIn() && request.auth.uid in resource.data.memberUids;
+      // created by its owner (sharing a workspace), with only themselves in it
+      allow create: if signedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.memberUids == [request.auth.uid]
+        && request.resource.data.members.keys().hasOnly([request.auth.uid])
+        && request.resource.data.members[request.auth.uid].role == 'owner'
+        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 60;
+      // owner/admins may rename it; membership and deletion are functions-only
+      allow update: if signedIn() && resource.data.members[request.auth.uid].role in ['owner', 'admin']
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'updatedAt'])
+        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 60;
+      allow delete: if false;
+
+      match /joinRequests/{uid} {
+        allow read, delete: if signedIn() && (request.auth.uid == uid || isTeamManager(teamId));
+        allow create, update: if false;
+      }
+    }
+
     // Email invites: created by the project owner; read by the owner or the
     // invitee (matching, verified email). Accept/decline via functions.
     match /invites/{inviteId} {
       allow create: if signedIn()
         && request.resource.data.ownerId == request.auth.uid
-        && isOwnerOf(request.resource.data.projectId)
+        && canInvite(request.resource.data)
         && request.resource.data.invitedBy.uid == request.auth.uid
         && request.resource.data.status == 'pending'
-        && request.resource.data.role in ['editor', 'viewer']
         && request.resource.data.email is string
         && request.resource.data.email == request.resource.data.email.lower()
         && request.resource.data.email.matches('^[^@ ]+@[^@ ]+$')
@@ -77,8 +123,9 @@ service cloud.firestore {
       allow read: if signedIn() && (
         resource.data.ownerId == request.auth.uid
         || resource.data.inviteeUid == request.auth.uid
-        || (request.auth.token.email_verified == true && resource.data.email == myEmail()));
-      allow delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+        || (request.auth.token.email_verified == true && resource.data.email == myEmail())
+        || (('teamId' in resource.data) && isTeamManager(resource.data.teamId)));
+      allow delete: if signedIn() && (resource.data.ownerId == request.auth.uid || managesTarget(resource.data));
       allow update: if false;
     }
 
@@ -87,12 +134,11 @@ service cloud.firestore {
       allow create: if signedIn()
         && code.matches('^[A-Z0-9]{8}$')
         && request.resource.data.ownerId == request.auth.uid
-        && isOwnerOf(request.resource.data.projectId)
-        && request.resource.data.role in ['editor', 'viewer']
+        && canInvite(request.resource.data)
         && request.resource.data.requiresApproval is bool
         && request.resource.data.revoked == false;
-      allow read, delete: if signedIn() && resource.data.ownerId == request.auth.uid;
-      allow update: if signedIn() && resource.data.ownerId == request.auth.uid
+      allow read, delete: if signedIn() && (resource.data.ownerId == request.auth.uid || managesTarget(resource.data));
+      allow update: if signedIn() && (resource.data.ownerId == request.auth.uid || managesTarget(resource.data))
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['revoked']);
     }
 

@@ -200,6 +200,95 @@ await check("eve cannot see carol's account invite", () => fails(getDocs(query(c
 await check("eve cannot accept carol's account invite", () => fails(eve.call('acceptInvite')({ inviteId: carolInv }), /different account/));
 await check('carol accepts (account invites need no verified email)', async () => eq((await carol.call('acceptInvite')({ inviteId: carolInv })).role, 'editor', 'role'));
 
+// ================= team workspaces (stage 3) =================
+const T = 'team-' + Date.now();
+const P2 = 'tproj-' + Date.now();
+const P3 = 'bproj-' + Date.now();
+const tdoc = (s) => doc(s.fs, 'teams', T);
+const p2doc = (s) => doc(s.fs, 'projects', P2);
+const live2 = (s) => push(ref(s.db, `projects/${P2}/b/main/docs/main~2Ejs/updates`), { state: 'AAA=', origin: 1 });
+const team = () => ({ name: 'Acme Team', ownerId: owner.uid, members: { [owner.uid]: { role: 'owner', name: 'Olu Owner', email: 'owner@team.dev', photo: '' } }, memberUids: [owner.uid], createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+const proj = (s, name) => ({ name, ownerId: s.uid, repoUrl: '', members: { [s.uid]: { role: 'owner', name: 'x', email: 'x@x.dev', photo: '' } }, memberUids: [s.uid], createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+const tinvite = (s, email, role, extra = {}) => addDoc(collection(s.fs, 'invites'), { teamId: T, teamName: 'Acme Team', ownerId: s.uid, email, role, status: 'pending', invitedBy: { uid: s.uid, name: 'x' }, createdAt: serverTimestamp(), ...extra });
+
+await check('team: owner shares a workspace (creates the team)', () => setDoc(tdoc(owner), team()));
+await check('team: cannot create a team that lists other members', () => fails(setDoc(doc(eve.fs, 'teams', T + 'x'), { ...team(), ownerId: eve.uid, members: { [eve.uid]: { role: 'owner' }, [bob.uid]: { role: 'admin' } }, memberUids: [eve.uid, bob.uid] })));
+await check('team: non-members cannot read it', () => fails(getDoc(tdoc(bob))));
+await check('team: owner moves their cloud project into it', async () => {
+  await setDoc(p2doc(owner), proj(owner, 'Team Project'));
+  await set(ref(owner.db, `projectMembers/${P2}`), { [owner.uid]: 'owner' });
+  await owner.call('addProjectToTeam')({ projectId: P2, teamId: T });
+  eq((await getDoc(p2doc(owner))).data().teamId, T, 'teamId');
+});
+await check('team: the project owner cannot change teamId directly', () => fails(updateDoc(p2doc(owner), { teamId: 'other' })));
+
+let bobTeamInvite;
+await check('team: owner invites bob to the workspace as editor', async () => { bobTeamInvite = (await tinvite(owner, 'bob@team.dev', 'editor')).id; });
+await check('team: bob accepts → editor on the workspace', async () => eq((await bob.call('acceptInvite')({ inviteId: bobTeamInvite })).role, 'editor', 'role'));
+await check("team: bob now reaches the workspace's project (read + live edit)", async () => {
+  eq((await getDoc(p2doc(bob))).data().name, 'Team Project', 'read');
+  eq((await get(ref(bob.db, `projectMembers/${P2}/${bob.uid}`))).val(), 'editor', 'mirror');
+  await live2(bob);
+});
+await check('team: a viewer link gives viewer access to its projects', async () => {
+  await setDoc(doc(owner.fs, 'inviteLinks', 'TEAM2345'), { teamId: T, ownerId: owner.uid, role: 'viewer', requiresApproval: false, revoked: false, expiresAt: null, createdAt: serverTimestamp() });
+  const r = await dan.call('redeemCode')({ code: 'TEAM2345' });
+  eq([r.kind, r.role], ['team', 'viewer'], 'joined');
+  eq((await get(ref(dan.db, `projectMembers/${P2}/${dan.uid}`))).val(), 'viewer', 'mirror');
+  await fails(live2(dan));
+});
+await check('team: highest role wins (team viewer + project editor = editor)', async () => {
+  const inv = (await addDoc(collection(owner.fs, 'invites'), { projectId: P2, projectName: 'Team Project', ownerId: owner.uid, email: 'dan@team.dev', role: 'editor', status: 'pending', invitedBy: { uid: owner.uid, name: 'x' }, createdAt: serverTimestamp() })).id;
+  await dan.call('acceptInvite')({ inviteId: inv });
+  eq((await get(ref(dan.db, `projectMembers/${P2}/${dan.uid}`))).val(), 'editor', 'effective');
+  await live2(dan);
+});
+
+await check('team: owner makes bob an admin', async () => {
+  await owner.call('setMemberRole')({ teamId: T, uid: bob.uid, role: 'admin' });
+  eq((await getDoc(tdoc(bob))).data().members[bob.uid].role, 'admin', 'role');
+  eq((await get(ref(bob.db, `projectMembers/${P2}/${bob.uid}`))).val(), 'editor', 'admins edit projects');
+});
+await check('team: admins see every pending team invite (not just their own)', async () => {
+  await tinvite(owner, 'someone@team.dev', 'viewer');
+  const s2 = await getDocs(query(collection(bob.fs, 'invites'), where('teamId', '==', T), where('status', '==', 'pending')));
+  if (!s2.docs.some((d) => d.data().email === 'someone@team.dev')) throw new Error("admin can't see the owner's invite");
+});
+await check('team: an admin can invite editors', () => tinvite(bob, 'new@team.dev', 'editor'));
+await check('team: an admin cannot invite admins', () => fails(tinvite(bob, 'boss@team.dev', 'admin')));
+await check('team: an admin cannot promote someone to admin', () => fails(bob.call('setMemberRole')({ teamId: T, uid: dan.uid, role: 'admin' }), /owner can manage admins/));
+await check('team: an admin can add their own project', async () => {
+  await setDoc(doc(bob.fs, 'projects', P3), proj(bob, "Bob's Project"));
+  await bob.call('addProjectToTeam')({ projectId: P3, teamId: T });
+  eq((await getDoc(doc(owner.fs, 'projects', P3))).data().teamId, T, 'owner reaches it via the team');
+});
+await check("team: nobody can move someone else's project into a team", () => fails(bob.call('addProjectToTeam')({ projectId: P2, teamId: T }), /project owner/));
+await check('team: editors cannot manage the workspace', () => fails(dan.call('setMemberRole')({ teamId: T, uid: bob.uid, role: 'viewer' }), /owner or an admin/));
+
+await check('team: moving a project out removes the team’s access', async () => {
+  await bob.call('removeProjectFromTeam')({ projectId: P2 }); // admin moves it out
+  await fails(getDoc(p2doc(bob))); // bob only had it through the team
+  eq((await get(ref(owner.db, `projectMembers/${P2}/${bob.uid}`))).val(), null, 'mirror');
+  eq((await get(ref(owner.db, `projectMembers/${P2}/${dan.uid}`))).val(), 'editor', 'direct member keeps access');
+});
+await check('team: removing a member removes their project access', async () => {
+  await owner.call('addProjectToTeam')({ projectId: P2, teamId: T });
+  eq((await getDoc(p2doc(bob))).exists(), true, 'bob back via team');
+  await owner.call('removeMember')({ teamId: T, uid: bob.uid });
+  await fails(getDoc(p2doc(bob)));
+  await fails(getDoc(tdoc(bob)));
+});
+await check('team: the owner cannot leave', () => fails(owner.call('removeMember')({ teamId: T }), /Stop sharing/));
+await check('team: only the owner can stop sharing', () => fails(dan.call('deleteTeam')({ teamId: T }), /Only the workspace owner/));
+await check('team: stopping sharing keeps projects with their owners', async () => {
+  const r = await owner.call('deleteTeam')({ teamId: T });
+  eq(r.projects, 2, 'projects released');
+  eq((await getDoc(p2doc(owner))).data().teamId, undefined, 'teamId cleared');
+  eq((await get(ref(owner.db, `projectMembers/${P2}/${dan.uid}`))).val(), 'editor', 'direct members stay');
+  eq((await getDoc(doc(bob.fs, 'projects', P3))).data().ownerId, bob.uid, "bob's project is still bob's");
+  await fails(getDoc(doc(owner.fs, 'projects', P3))); // owner only reached it via the team
+});
+
 const failed = results.filter((r) => r[0] === 'FAIL');
 for (const r of results) console.log(r[0].padEnd(5), r[1], r[2] ? `\n      → ${r[2]}` : '');
 console.log(`\n${results.length - failed.length} passed, ${failed.length} failed`);
