@@ -45,7 +45,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     create: (name) => ipcRenderer.invoke(IPC.WS_CREATE, name),
     rename: (id, name) => ipcRenderer.invoke(IPC.WS_RENAME, id, name),
     setCurrent: (id) => ipcRenderer.invoke(IPC.WS_SET_CURRENT, id),
-    remove: (id, moveTo) => ipcRenderer.invoke(IPC.WS_DELETE, id, moveTo)
+    remove: (id, moveTo) => ipcRenderer.invoke(IPC.WS_DELETE, id, moveTo),
+    upsertTeam: (ws) => ipcRenderer.invoke(IPC.WS_UPSERT_TEAM, ws)
   },
 
   // Project-wide search

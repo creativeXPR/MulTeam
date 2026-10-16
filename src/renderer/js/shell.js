@@ -1,4 +1,4 @@
-import { watchAuthState, watchCloudConnection, signOut, createCloudProject, deleteCloudProject, upsertDocumentMeta, ensureLiveMembership, getCloudProject, setProjectRepo } from './firebase.js';
+import { watchAuthState, watchCloudConnection, signOut, createCloudProject, deleteCloudProject, upsertDocumentMeta, ensureLiveMembership, getCloudProject, setProjectRepo, createTeam, cloudCalls } from './firebase.js';
 import { fileKeyFor } from './sync.js';
 import { initCollab } from './collab.js';
 import { initGitHubAccount } from './githubAccount.js';
@@ -475,35 +475,138 @@ async function renameWorkspace(ws = currentWs()) {
 
 async function deleteWorkspace(ws = currentWs()) {
   if (workspaces.length < 2) return;
+  if (ws.joined) { collab.openShareWorkspace(ws.teamId); toast('Leave the workspace from its members dialog', 'error'); return; }
   const target = workspaces.find((w) => w.id !== ws.id);
   const count = everyProject.filter((p) => wsOf(p) === ws.id).length;
   const ok = await confirmDialog({
     title: `Delete the "${ws.name}" workspace?`,
-    message: count
+    message: (ws.teamId ? 'It is shared, so it stops being shared first: the team loses access to its projects. ' : '') + (count
       ? `Its ${count} project${count === 1 ? '' : 's'} will move to "${target.name}". No projects, files or folders are deleted.`
-      : 'It has no projects. No files or folders are touched.',
+      : 'It has no projects. No files or folders are touched.'),
     confirmLabel: 'Delete workspace',
     danger: true
   });
   if (!ok) return;
+  if (ws.teamId) {
+    try { await cloudCalls.deleteTeam({ teamId: ws.teamId }); } catch (err) { toast(cleanError(err), 'error'); return; }
+  }
   try { await window.electronAPI.workspaces.remove(ws.id, target.id); } catch (err) { toast(cleanError(err), 'error'); return; }
   await refreshProjects();
   toast(`Deleted ${ws.name}`);
 }
 
 function workspaceMenuItems() {
+  const ws = currentWs();
   return [
     ...workspaces.map((w) => ({
-      label: w.name,
+      label: w.teamId ? `${w.name} · shared` : w.name,
       kbd: String(everyProject.filter((p) => wsOf(p) === w.id).length),
       checked: w.id === currentWsId,
       onClick: () => switchWorkspace(w.id)
     })),
     '-',
     { label: 'New Workspace…', onClick: newWorkspace },
-    { label: 'Rename Workspace…', onClick: () => renameWorkspace() },
-    { label: 'Delete Workspace…', danger: true, disabled: workspaces.length < 2, onClick: () => deleteWorkspace() }
+    ws?.teamId
+      ? { label: 'Workspace Members…', onClick: () => collab.openShareWorkspace(ws.teamId) }
+      : { label: 'Share Workspace…', onClick: () => shareWorkspace() },
+    ...(ws?.teamId && !ws.joined ? [{ label: 'Stop Sharing…', danger: true, onClick: () => stopSharingWorkspace() }] : []),
+    { label: 'Rename Workspace…', disabled: !!ws?.joined, onClick: () => renameWorkspace() },
+    { label: 'Delete Workspace…', danger: true, disabled: workspaces.length < 2 || !!ws?.joined, onClick: () => deleteWorkspace() }
   ];
+}
+
+// ---------- team workspaces (stage 3) ----------
+// Sharing a workspace makes every project in it a cloud project and puts it
+// in the team, so everyone invited gets all of them.
+async function shareWorkspace(ws = currentWs()) {
+  requireAuth(async () => {
+    const mine = allProjects.filter((p) => wsOf(p) === ws.id && !p.joined);
+    const others = allProjects.filter((p) => wsOf(p) === ws.id && p.joined).length;
+    const ok = await confirmDialog({
+      title: `Share “${ws.name}” with a team?`,
+      message: `Everyone you invite gets every project in this workspace${mine.length ? ` (${mine.length} now, and any you add later)` : ''}. Projects that aren't cloud projects yet will have cloud sync turned on.` + (others ? ` ${others} project${others === 1 ? '' : 's'} you joined from others stay as they are.` : ''),
+      confirmLabel: 'Share workspace'
+    });
+    if (!ok) return;
+    try {
+      await createTeam(ws.id, ws.name, currentUser);
+      for (const p of mine) {
+        if (!p.cloudEnabled) {
+          await createCloudProject(p.id, p.name, currentUser);
+          await window.electronAPI.updateProject(p.id, { cloudEnabled: true });
+        }
+        await cloudCalls.addProjectToTeam({ projectId: p.id, teamId: ws.id });
+      }
+      await window.electronAPI.workspaces.upsertTeam({ id: ws.id, teamId: ws.id });
+      await refreshProjects();
+      toast(`“${ws.name}” is shared. Invite your team.`);
+      collab.openShareWorkspace(ws.id);
+    } catch (err) { toast(cleanError(err), 'error'); }
+  });
+}
+
+async function stopSharingWorkspace(ws = currentWs()) {
+  const ok = await confirmDialog({
+    title: `Stop sharing “${ws.name}”?`,
+    message: 'The team loses access to its projects (people you added to a project directly keep it). Your projects stay cloud projects on this computer.',
+    confirmLabel: 'Stop sharing',
+    danger: true
+  });
+  if (!ok) return;
+  try {
+    await cloudCalls.deleteTeam({ teamId: ws.teamId });
+    await window.electronAPI.workspaces.upsertTeam({ id: ws.id, teamId: null });
+    await refreshProjects();
+    toast(`“${ws.name}” is no longer shared`);
+  } catch (err) { toast(cleanError(err), 'error'); }
+}
+
+// Keep local workspaces in step with the team workspaces I'm in.
+let teamsSeen = false;
+async function syncTeamWorkspaces(teams) {
+  if (!teams) return;
+  let changed = false;
+  for (const t of teams) {
+    const local = workspaces.find((w) => w.id === t.id || w.teamId === t.id);
+    const mineToOwn = t.ownerId === currentUser?.uid;
+    if (!local || local.teamId !== t.id || (local.joined && local.name !== t.name)) {
+      await window.electronAPI.workspaces.upsertTeam({ id: local?.id || t.id, name: mineToOwn ? undefined : t.name, teamId: t.id, joined: !mineToOwn });
+      changed = true;
+    }
+  }
+  // shared workspaces I'm no longer in (removed, or sharing stopped)
+  if (teamsSeen) {
+    for (const w of workspaces.filter((x) => x.teamId && !teams.some((t) => t.id === x.teamId))) {
+      await window.electronAPI.workspaces.upsertTeam({ id: w.id, teamId: null });
+      if (w.joined) toast(`You no longer have access to the workspace “${w.name}”`, 'error');
+      changed = true;
+    }
+  }
+  teamsSeen = true;
+  if (changed) await refreshProjects();
+}
+
+// A shared project I own entering/leaving a shared workspace.
+async function moveProjectAcrossTeams(p, fromWs, toWs) {
+  if (fromWs?.teamId && fromWs.teamId !== toWs?.teamId && p.cloudEnabled && !p.joined) {
+    const ok = await confirmDialog({
+      title: `Move “${p.name}” out of “${fromWs.name}”?`,
+      message: "This workspace is shared: its team loses access to the project (people added to the project directly keep it).",
+      confirmLabel: 'Move project',
+      danger: true
+    });
+    if (!ok) return false;
+    await cloudCalls.removeProjectFromTeam({ projectId: p.id });
+  }
+  if (toWs?.teamId && fromWs?.teamId !== toWs.teamId) {
+    if (p.joined) throw new Error("Only a project's owner can move it into a shared workspace.");
+    if (!p.cloudEnabled) {
+      await createCloudProject(p.id, p.name, currentUser);
+      await window.electronAPI.updateProject(p.id, { cloudEnabled: true });
+    }
+    await cloudCalls.addProjectToTeam({ projectId: p.id, teamId: toWs.teamId });
+  }
+  return true;
 }
 
 function openWorkspaceMenu(anchor) {
@@ -515,7 +618,12 @@ for (const id of ['wsExplorerBtn', 'wsDashBtn']) {
 }
 
 async function moveProjectToWorkspace(p, wsId) {
-  try { await window.electronAPI.updateProject(p.id, { workspaceId: wsId }); } catch (err) { toast(cleanError(err), 'error'); return; }
+  const fromWs = workspaces.find((w) => w.id === wsOf(p));
+  const toWs = workspaces.find((w) => w.id === wsId);
+  try {
+    if ((fromWs?.teamId || toWs?.teamId) && !(await moveProjectAcrossTeams(p, fromWs, toWs))) return;
+    await window.electronAPI.updateProject(p.id, { workspaceId: wsId });
+  } catch (err) { toast(cleanError(err), 'error'); return; }
   await refreshProjects();
   toast(`Moved ${p.name} to ${workspaces.find((w) => w.id === wsId)?.name}`);
 }
@@ -602,8 +710,10 @@ projectForm.addEventListener('submit', async (e) => {
 
   try {
     if (modalMode === 'create') {
-      const created = await window.electronAPI.createProject({ name, folderPath: chosenFolder, cloudEnabled, workspaceId: currentWsId });
-      if (cloudEnabled) await enableCloud(created.id, name);
+      const teamId = currentWs()?.teamId;
+      const created = await window.electronAPI.createProject({ name, folderPath: chosenFolder, cloudEnabled: cloudEnabled || !!teamId, workspaceId: currentWsId });
+      if (cloudEnabled || teamId) await enableCloud(created.id, name);
+      if (teamId) await cloudCalls.addProjectToTeam({ projectId: created.id, teamId });
       projectModal.hidden = true;
       await refreshProjects();
       openProjectView(created);
@@ -2624,7 +2734,27 @@ collab = initCollab({
     if (p) openProjectView(p);
   },
   chooseFolder: () => window.electronAPI.openDirectory(),
-  createLocalProject: (o) => window.electronAPI.createProject({ ...o, workspaceId: currentWsId }),
+  createLocalProject: (o) => window.electronAPI.createProject({ ...o, workspaceId: o.workspaceId || currentWsId }),
+  workspaceForTeam: (teamId) => (teamId ? workspaces.find((w) => w.teamId === teamId)?.id || null : null),
+  onTeamsChanged: (teams) => { syncTeamWorkspaces(teams).catch((err) => console.warn('[teams]', err)); },
+  onJoinedTeam: async (teamId, name) => {
+    await window.electronAPI.workspaces.upsertTeam({ id: teamId, name, teamId, joined: true });
+    await refreshProjects();
+    await switchWorkspace(teamId);
+    go('dashboard');
+    toast(`Welcome to “${name}”. Its projects are listed under Shared with you; set them up on this computer.`);
+  },
+  onLeftTeam: async (teamId) => {
+    const ws = workspaces.find((w) => w.teamId === teamId);
+    if (!ws) return;
+    for (const p of everyProject.filter((x) => wsOf(x) === ws.id && x.joined)) {
+      if (project?.id === p.id) closeProjectView();
+      await window.electronAPI.deleteProjectLocal(p.id);
+    }
+    if (ws.joined && workspaces.length > 1) await window.electronAPI.workspaces.remove(ws.id, workspaces.find((w) => w.id !== ws.id).id);
+    else await window.electronAPI.workspaces.upsertTeam({ id: ws.id, teamId: null });
+    await refreshProjects();
+  },
   removeLocalProject: async (id) => {
     if (project?.id === id) closeProjectView();
     await window.electronAPI.deleteProjectLocal(id);

@@ -5,12 +5,13 @@
 import {
   cloudCalls, watchCloudProject, watchMyCloudProjects, inviteByEmail, watchProjectInvites, revokeInvite,
   createInviteLink, watchInviteLinks, revokeInviteLink, watchJoinRequests, watchMyInvites, formatCode,
-  resendVerification, refreshUser, forgetLiveMembership, listMyPastInvites, getCloudProject
+  resendVerification, refreshUser, forgetLiveMembership, listMyPastInvites, getCloudProject,
+  watchTeam, watchMyTeams
 } from './firebase.js';
 import { enhanceSelects } from './select.js';
 
-const ROLE_LABEL = { owner: 'Owner', editor: 'Editor', viewer: 'Viewer' };
-const ROLE_HINT = { editor: 'can edit code', viewer: 'can watch and follow, not edit' };
+const ROLE_LABEL = { owner: 'Owner', admin: 'Admin', editor: 'Editor', viewer: 'Viewer' };
+const ROLE_HINT = { admin: 'manages members and projects', editor: 'can edit code', viewer: 'can watch and follow, not edit' };
 const linkFor = (code) => `multeam://join/${formatCode(code)}`;
 const codeFrom = (text) => {
   const m = String(text || '').toUpperCase().match(/([A-Z0-9]{4})-?([A-Z0-9]{4})\s*$/);
@@ -18,7 +19,7 @@ const codeFrom = (text) => {
 };
 const initialOf = (s) => (String(s || '?').trim()[0] || '?').toUpperCase();
 
-export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireAuth, getLocalProjects, refreshProjects, openProjectById, chooseFolder, createLocalProject, removeLocalProject, github }) {
+export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireAuth, getLocalProjects, refreshProjects, openProjectById, chooseFolder, createLocalProject, removeLocalProject, github, onTeamsChanged = () => {}, onJoinedTeam = () => {}, onLeftTeam = () => {}, workspaceForTeam = () => null }) {
   const esc = escapeHtml;
   const cleanErr = (err) => String(err?.message || err).replace(/^(FirebaseError: )?/, '');
 
@@ -106,7 +107,15 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
   enhanceSelects($('share-modal'));
 
   // ---------------------------------------------------------------- share
-  const share = { project: null, unsubs: [], projectId: null };
+  // share.project is the open target: a project, or a team workspace (kind 'team')
+  const share = { project: null, unsubs: [], projectId: null, kind: 'project' };
+  const isTeam = () => share.kind === 'team';
+  const tgt = (extra = {}) => (isTeam() ? { teamId: share.projectId, ...extra } : { projectId: share.projectId, ...extra });
+  const myRoleIn = (p) => p?.members?.[getUser()?.uid]?.role || null;
+  const canManage = (p) => (isTeam() ? ['owner', 'admin'].includes(myRoleIn(p)) : myRoleIn(p) === 'owner');
+  // roles this person may hand out here (only a workspace owner grants Admin)
+  const grantable = (p) => (isTeam() ? (myRoleIn(p) === 'owner' ? ['admin', 'editor', 'viewer'] : ['editor', 'viewer']) : ['editor', 'viewer']);
+  const roleOptions = (roles, selected, prefix = '') => roles.map((r) => `<option value="${r}" ${r === selected ? 'selected' : ''}>${prefix}${ROLE_LABEL[r]}</option>`).join('');
   const shareModal = $('share-modal');
 
   function closeShare() {
@@ -119,11 +128,12 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
   $('share-done').addEventListener('click', closeShare);
   shareModal.addEventListener('click', (e) => { if (e.target === shareModal) closeShare(); });
 
-  function openShare(projectId) {
+  function openShare(projectId, kind = 'project') {
     requireAuth(() => {
       const me = getUser();
       closeShare();
       share.projectId = projectId;
+      share.kind = kind;
       shareModal.hidden = false;
       $('share-title').textContent = 'Share';
       $('share-sub').textContent = 'Loading…';
@@ -132,43 +142,58 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
       $('share-requests-sec').hidden = true;
       $('share-email').value = '';
       share.invites = [];
-      share.unsubs.push(watchCloudProject(projectId, (p) => {
+      const watch = kind === 'team' ? watchTeam : watchCloudProject;
+      share.unsubs.push(watch(projectId, (p) => {
         if (!p) {
-          $('share-sub').textContent = "This project isn't in the cloud, or you no longer have access to it.";
+          $('share-sub').textContent = kind === 'team' ? "This workspace isn't shared any more, or you're no longer in it." : "This project isn't in the cloud, or you no longer have access to it.";
           shareModal.querySelectorAll('[data-owner-only]').forEach((el) => { el.hidden = true; });
           $('share-members').innerHTML = '';
           return;
         }
         const firstLoad = !share.project;
+        p.kind = kind;
         share.project = p;
         const myRole = p.members?.[me.uid]?.role;
         const owner = myRole === 'owner';
-        $('share-title').textContent = `Share “${p.name}”`;
+        const manage = canManage(p);
+        const noun = kind === 'team' ? 'workspace' : 'project';
+        $('share-title').textContent = kind === 'team' ? `Share workspace “${p.name}”` : `Share “${p.name}”`;
         const repo = p.repoUrl ? ` · Repository: ${p.repoUrl.replace(/^https:\/\//, '')}` : '';
-        $('share-sub').textContent = (owner ? 'You own this project.' : `You're ${myRole === 'editor' ? 'an editor' : 'a viewer'} here.`) + repo;
-        shareModal.querySelectorAll('[data-owner-only]').forEach((el) => { if (el.id !== 'share-requests-sec') el.hidden = !owner; });
+        const viaTeam = kind === 'project' && p.teamId ? ' · Also shared through its team workspace' : '';
+        const youAre = owner ? `You own this ${noun}.` : myRole ? `You're ${myRole === 'admin' ? 'an admin' : myRole === 'editor' ? 'an editor' : 'a viewer'} here.` : 'You have access through its team workspace.';
+        $('share-sub').textContent = youAre + (kind === 'team' ? ' Everyone here gets every project in the workspace.' : '') + repo + viaTeam;
+        shareModal.querySelectorAll('[data-owner-only]').forEach((el) => { if (el.id !== 'share-requests-sec') el.hidden = !manage; });
         $('share-leave').hidden = owner || !myRole;
-        renderMembers(p, owner, me.uid);
-        if (firstLoad && owner) {
+        $('share-leave').textContent = kind === 'team' ? 'Leave workspace' : 'Leave project';
+        renderMembers(p, manage, me.uid);
+        if (firstLoad) {
+          // role pickers for inviting: only what this person may grant
+          const roles = grantable(p);
+          $('share-invite-role').innerHTML = roleOptions(roles, 'editor');
+          $('share-link-role').innerHTML = roleOptions(roles, 'editor', 'Joins as ');
+        }
+        if (firstLoad && manage) {
           listMyPastInvites(me.uid).then((list) => { pastInvites = list; }).catch(() => {});
-          share.unsubs.push(watchProjectInvites(projectId, me.uid, renderInvites));
-          share.unsubs.push(watchInviteLinks(projectId, me.uid, renderLinks));
-          share.unsubs.push(watchJoinRequests(projectId, renderRequests));
+          const target = { kind, id: projectId };
+          share.unsubs.push(watchProjectInvites(target, me.uid, renderInvites));
+          share.unsubs.push(watchInviteLinks(target, me.uid, renderLinks));
+          share.unsubs.push(watchJoinRequests(target, renderRequests));
         }
       }));
     });
   }
 
-  function renderMembers(p, owner, myUid) {
+  function renderMembers(p, manage, myUid) {
+    const roles = grantable(p);
     const list = Object.entries(p.members || {}).sort(([, a], [, b]) => (b.role === 'owner') - (a.role === 'owner') || String(a.name).localeCompare(String(b.name)));
     $('share-count').textContent = `(${list.length})`;
     $('share-members').innerHTML = list.map(([uid, m]) => `
       <div class="share__item" data-uid="${esc(uid)}">
         <span class="share__av">${m.photo ? `<img src="${esc(m.photo)}" alt="" referrerpolicy="no-referrer" />` : esc(initialOf(m.name))}</span>
         <span class="share__who"><b>${esc(m.name || 'Member')}${uid === myUid ? ' (you)' : ''}</b><small>${esc(m.email || '')}</small></span>
-        ${owner && m.role !== 'owner'
-          ? `<select class="pill sm" data-role-for="${esc(uid)}"><option value="editor" ${m.role === 'editor' ? 'selected' : ''}>Editor</option><option value="viewer" ${m.role === 'viewer' ? 'selected' : ''}>Viewer</option></select>
-             <button type="button" class="ibtn" data-remove="${esc(uid)}" title="Remove from project" aria-label="Remove"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></svg></button>`
+        ${manage && m.role !== 'owner' && uid !== myUid && roles.includes(m.role)
+          ? `<select class="pill sm" data-role-for="${esc(uid)}">${roleOptions(roles, m.role)}</select>
+             <button type="button" class="ibtn" data-remove="${esc(uid)}" title="Remove" aria-label="Remove"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></svg></button>`
           : `<span class="share__role">${ROLE_LABEL[m.role] || m.role}</span>`}
       </div>`).join('');
     enhanceSelects($('share-members'));
@@ -180,8 +205,8 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
     const uid = sel.dataset.roleFor;
     const name = share.project.members?.[uid]?.name || 'them';
     try {
-      await cloudCalls.setMemberRole({ projectId: share.project.id, uid, role: sel.value });
-      toast(`${name} is now ${sel.value === 'editor' ? 'an Editor' : 'a Viewer'}`);
+      await cloudCalls.setMemberRole(tgt({ uid, role: sel.value }));
+      toast(`${name} is now ${sel.value === 'admin' ? 'an Admin' : sel.value === 'editor' ? 'an Editor' : 'a Viewer'}`);
     } catch (err) { toast(cleanErr(err), 'error'); sel.value = share.project.members?.[uid]?.role || 'viewer'; }
   });
 
@@ -190,20 +215,31 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
     if (!btn || !share.project) return;
     const uid = btn.dataset.remove;
     const name = share.project.members?.[uid]?.name || 'this member';
-    const ok = await confirmDialog({ title: `Remove ${name}?`, message: `${name} loses access to "${share.project.name}" right away. Their local copy of the files isn't touched.`, confirmLabel: 'Remove', danger: true });
+    const ok = await confirmDialog({ title: `Remove ${name}?`, message: isTeam() ? `${name} loses access to "${share.project.name}" and every project in it right away. Their local copies of the files aren't touched.` : `${name} loses access to "${share.project.name}" right away. Their local copy of the files isn't touched.`, confirmLabel: 'Remove', danger: true });
     if (!ok) return;
-    try { await cloudCalls.removeMember({ projectId: share.project.id, uid }); toast(`Removed ${name}`); } catch (err) { toast(cleanErr(err), 'error'); }
+    try { await cloudCalls.removeMember(tgt({ uid })); toast(`Removed ${name}`); } catch (err) { toast(cleanErr(err), 'error'); }
   });
 
   $('share-leave').addEventListener('click', async () => {
     const p = share.project;
     if (!p) return;
-    const ok = await confirmDialog({ title: `Leave "${p.name}"?`, message: "You'll lose access to the shared project. Your local folder and files stay on this computer; MulTeam just stops listing the project.", confirmLabel: 'Leave project', danger: true });
+    const team = isTeam();
+    const ok = await confirmDialog({
+      title: `Leave "${p.name}"?`,
+      message: team
+        ? "You'll lose access to the workspace and its projects. Your local folders and files stay on this computer; MulTeam just stops listing them."
+        : "You'll lose access to the shared project. Your local folder and files stay on this computer; MulTeam just stops listing the project.",
+      confirmLabel: team ? 'Leave workspace' : 'Leave project',
+      danger: true
+    });
     if (!ok) return;
     try {
-      await cloudCalls.removeMember({ projectId: p.id });
-      forgetLiveMembership(p.id, getUser().uid);
-      await removeLocalProject(p.id);
+      await cloudCalls.removeMember(tgt());
+      if (team) await onLeftTeam(p.id);
+      else {
+        forgetLiveMembership(p.id, getUser().uid);
+        await removeLocalProject(p.id);
+      }
       closeShare();
       toast(`You left ${p.name}`);
     } catch (err) { toast(cleanErr(err), 'error'); }
@@ -253,7 +289,7 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
     searchTimer = setTimeout(async () => {
       const seq = ++searchSeq;
       try {
-        const res = await cloudCalls.searchUsers({ q, projectId: share.project?.id });
+        const res = await cloudCalls.searchUsers(tgt({ q }));
         if (seq !== searchSeq) return;
         remote = res.users || [];
         remoteQ = q;
@@ -329,7 +365,7 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
     const role = $('share-invite-role').value;
     try {
       if (picked && emailEl.value === picked.name) {
-        await cloudCalls.inviteUser({ projectId: p.id, uid: picked.uid, role });
+        await cloudCalls.inviteUser(tgt({ uid: picked.uid, role }));
         toast(`Invite sent to ${picked.name}`);
       } else {
         const typed = emailEl.value.trim();
@@ -366,7 +402,7 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
     const btn = $('share-link-create');
     btn.disabled = true;
     try {
-      const code = await createInviteLink(p.id, getUser().uid, {
+      const code = await createInviteLink({ kind: share.kind, id: p.id }, getUser().uid, {
         role: $('share-link-role').value,
         expiresInDays: Number($('share-link-expiry').value),
         requiresApproval: $('share-link-approval').checked
@@ -409,12 +445,12 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
 
   // join requests
   function renderRequests(list) {
-    $('share-requests-sec').hidden = !list.length || share.project?.members?.[getUser()?.uid]?.role !== 'owner';
+    $('share-requests-sec').hidden = !list.length || !canManage(share.project);
     $('share-requests').innerHTML = list.map((r) => `
       <div class="share__item">
         <span class="share__av">${r.photo ? `<img src="${esc(r.photo)}" alt="" referrerpolicy="no-referrer" />` : esc(initialOf(r.name))}</span>
         <span class="share__who"><b>${esc(r.name || 'Someone')}</b><small>${esc(r.email || '')}</small></span>
-        <select class="pill sm" data-req-role="${esc(r.uid)}"><option value="editor" ${r.role === 'editor' ? 'selected' : ''}>Editor</option><option value="viewer" ${r.role === 'viewer' ? 'selected' : ''}>Viewer</option></select>
+        <select class="pill sm" data-req-role="${esc(r.uid)}">${roleOptions(grantable(share.project), grantable(share.project).includes(r.role) ? r.role : 'viewer')}</select>
         <button type="button" class="primary sm" data-approve="${esc(r.uid)}">Approve</button>
         <button type="button" class="secondary sm" data-deny="${esc(r.uid)}" data-name="${esc(r.name || 'them')}">Deny</button>
       </div>`).join('');
@@ -431,7 +467,7 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
       if (!ok) return;
     }
     const role = shareModal.querySelector(`[data-req-role="${CSS.escape(uid)}"]`)?.value;
-    try { await cloudCalls.respondJoinRequest({ projectId: p.id, uid, approve: !!approve, role }); toast(approve ? 'Request approved' : 'Request denied'); } catch (err) { toast(cleanErr(err), 'error'); }
+    try { await cloudCalls.respondJoinRequest(tgt({ uid, approve: !!approve, role })); toast(approve ? 'Request approved' : 'Request denied'); } catch (err) { toast(cleanErr(err), 'error'); }
   });
 
   // ---------------------------------------------------------------- join
@@ -468,10 +504,10 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
         join.code = code;
         join.preview = pv;
         $('join-preview').hidden = false;
-        $('join-preview').innerHTML = `<b>${esc(pv.name)}</b>
-          <span>Owner: ${esc(pv.ownerName || 'unknown')}</span>
+        $('join-preview').innerHTML = `<b>${pv.kind === 'team' ? 'Workspace: ' : ''}${esc(pv.name)}</b>
+          <span>Owner: ${esc(pv.ownerName || 'unknown')}</span>${pv.kind === 'team' ? '<span>You get every project in this workspace.</span>' : ''}
           <span>${pv.member ? `You're already a member (${ROLE_LABEL[pv.member]}).` : `You'll join as <b>${ROLE_LABEL[pv.role]}</b> (${ROLE_HINT[pv.role]})${pv.requiresApproval ? ', after the owner approves.' : '.'}`}</span>`;
-        btn.textContent = pv.member ? 'Set up on this computer' : pv.requiresApproval ? 'Ask to join' : 'Join project';
+        btn.textContent = pv.member ? (pv.kind === 'team' ? 'Open workspace' : 'Set up on this computer') : pv.requiresApproval ? 'Ask to join' : pv.kind === 'team' ? 'Join workspace' : 'Join project';
         return;
       }
       const res = await cloudCalls.redeemCode({ code });
@@ -482,7 +518,8 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
       }
       closeJoin();
       toast(res.already ? `You're a member of ${res.name}` : `Joined ${res.name} as ${ROLE_LABEL[res.role]}`);
-      await setUpLocally({ id: res.projectId, name: res.name });
+      if (res.kind === 'team') await onJoinedTeam(res.teamId, res.name);
+      else await setUpLocally({ id: res.projectId, name: res.name });
     } catch (err) {
       $('join-error').textContent = cleanErr(err);
     } finally { btn.disabled = false; }
@@ -517,7 +554,7 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
     }
     if (!folder) return;
     try {
-      await createLocalProject({ id, name, folderPath: folder, cloudEnabled: true, joined: true });
+      await createLocalProject({ id, name, folderPath: folder, cloudEnabled: true, joined: true, workspaceId: workspaceForTeam(myCloud.find((p) => p.id === id)?.teamId) || undefined });
       await refreshProjects();
       openProjectById(id);
     } catch (err) { toast(cleanErr(err), 'error'); }
@@ -582,7 +619,7 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
         <span class="invite__acts"><button type="button" class="secondary sm" data-verify="resend">Resend email</button><button type="button" class="secondary sm" data-verify="check">I've verified</button></span></div>`);
     }
     for (const i of myInvites) {
-      parts.push(`<div class="invite"><span><b>${esc(i.invitedBy?.name || 'Someone')}</b> invited you to <b>${esc(i.projectName || 'a project')}</b> as ${ROLE_LABEL[i.role] || i.role}.</span>
+      parts.push(`<div class="invite"><span><b>${esc(i.invitedBy?.name || 'Someone')}</b> invited you to ${i.teamId ? 'the workspace ' : ''}<b>${esc(i.projectName || i.teamName || 'a project')}</b> as ${ROLE_LABEL[i.role] || i.role}.</span>
         <span class="invite__acts"><button type="button" class="primary sm" data-accept="${esc(i.id)}">Accept</button><button type="button" class="secondary sm" data-decline="${esc(i.id)}">Decline</button></span></div>`);
     }
     inviteBox.innerHTML = parts.join('');
@@ -604,7 +641,8 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
         accept.disabled = true;
         const res = await cloudCalls.acceptInvite({ inviteId: accept.dataset.accept });
         toast(`Joined ${res.name} as ${ROLE_LABEL[res.role]}`);
-        await setUpLocally({ id: res.projectId, name: res.name || inv?.projectName });
+        if (res.kind === 'team') await onJoinedTeam(res.teamId, res.name || inv?.teamName);
+        else await setUpLocally({ id: res.projectId, name: res.name || inv?.projectName });
       }
       if (decline) {
         const ok = await confirmDialog({ title: 'Decline this invite?', message: 'The owner can invite you again later.', confirmLabel: 'Decline', danger: true });
@@ -624,7 +662,7 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
       renderInviteBox();
       if (fresh.length) {
         fresh.forEach((i) => seenInvites.add(i.id));
-        toast(fresh.length === 1 ? `${fresh[0].invitedBy?.name || 'Someone'} invited you to ${fresh[0].projectName}. Open notifications to respond.` : `${fresh.length} new project invites. Open notifications to respond.`);
+        toast(fresh.length === 1 ? `${fresh[0].invitedBy?.name || 'Someone'} invited you to ${fresh[0].projectName || fresh[0].teamName}. Open notifications to respond.` : `${fresh.length} new invites. Open notifications to respond.`);
       }
     });
   }
@@ -637,14 +675,16 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
     if (!host) return;
     const localIds = new Set(getLocalProjects().map((p) => p.id));
     const me = getUser();
-    const list = myCloud.filter((p) => !localIds.has(p.id) && p.members?.[me?.uid]);
+    const list = myCloud.filter((p) => !localIds.has(p.id) && p.ownerId !== me?.uid && (p.memberUids || []).includes(me?.uid));
     host.hidden = !list.length;
     host.querySelector('.shared__list').innerHTML = list.map((p) => {
-      const role = p.members[me.uid].role;
-      const owner = Object.values(p.members).find((m) => m.role === 'owner');
+      const direct = p.members?.[me.uid]?.role;
+      const team = p.teamId ? myTeams.find((t) => t.id === p.teamId) : null;
+      const owner = Object.values(p.members || {}).find((m) => m.role === 'owner');
+      const how = direct ? ROLE_LABEL[direct] : team ? `via workspace “${esc(team.name)}”` : 'shared';
       return `<div class="shared__item">
         <span class="share__av">${esc(initialOf(p.name))}</span>
-        <span class="share__who"><b>${esc(p.name)}</b><small>${ROLE_LABEL[role]} · owned by ${esc(owner?.name || 'someone')} · ${Object.keys(p.members).length} member${Object.keys(p.members).length === 1 ? '' : 's'}</small></span>
+        <span class="share__who"><b>${esc(p.name)}</b><small>${how} · owned by ${esc(owner?.name || 'someone')}</small></span>
         <button type="button" class="primary sm" data-setup="${esc(p.id)}">Set up on this computer</button>
       </div>`;
     }).join('');
@@ -656,13 +696,24 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
     if (p) setUpLocally({ id: p.id, name: p.name, repoUrl: p.repoUrl });
   });
 
+  let myTeams = [];
+  let unsubTeams = () => {};
   function onAuth(user) {
     watchInvites(user);
     unsubMine();
+    unsubTeams();
     myCloud = [];
+    myTeams = [];
     renderSharedWithMe();
-    if (user) unsubMine = watchMyCloudProjects(user.uid, (list) => { myCloud = list; renderSharedWithMe(); });
-    else unsubMine = () => {};
+    if (user) {
+      unsubMine = watchMyCloudProjects(user.uid, (list) => { myCloud = list; renderSharedWithMe(); });
+      // team workspaces I'm in → keep matching local workspaces
+      unsubTeams = watchMyTeams(user.uid, (teams) => { myTeams = teams; onTeamsChanged(teams); renderSharedWithMe(); });
+    } else {
+      unsubMine = () => {};
+      unsubTeams = () => {};
+      onTeamsChanged(null);
+    }
   }
 
   return {
@@ -670,6 +721,9 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
     openJoin,
     onAuth,
     projectsChanged: renderSharedWithMe,
+    openShareWorkspace: (teamId) => openShare(teamId, 'team'),
+    teams: () => myTeams,
+    cloudProjects: () => myCloud,
     isOpen: () => !shareModal.hidden || !joinModal.hidden,
     close: () => { closeShare(); closeJoin(); }
   };

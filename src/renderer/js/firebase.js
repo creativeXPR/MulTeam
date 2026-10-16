@@ -171,7 +171,10 @@ export const cloudCalls = {
   removeMember: callable('removeMember'),
   searchUsers: callable('searchUsers'),
   inviteUser: callable('inviteUser'),
-  syncMembers: callable('syncMembers')
+  syncMembers: callable('syncMembers'),
+  addProjectToTeam: callable('addProjectToTeam'),
+  removeProjectFromTeam: callable('removeProjectFromTeam'),
+  deleteTeam: callable('deleteTeam')
 };
 
 const projectDoc = (projectId) => doc(firestore, COLLECTIONS.PROJECTS, projectId);
@@ -282,15 +285,49 @@ export async function deleteCloudProject(projectId, ownerId) {
   try { await deleteDoc(projectDoc(projectId)); } catch (err) { if (!/permission|not.found/i.test(err.message)) throw err; }
 }
 
+// ---------- team workspaces (stage 3) ----------
+//   teams/{teamId}  { name, ownerId, members: { uid: { role, name, email, photo } }, memberUids }
+// The owner's team id is their local workspace's id.
+export async function createTeam(teamId, name, owner) {
+  await setDoc(doc(firestore, 'teams', teamId), {
+    name: String(name).slice(0, 60) || 'Workspace',
+    ownerId: owner.uid,
+    members: { [owner.uid]: { role: 'owner', ...profileOf(owner), joinedAt: serverTimestamp() } },
+    memberUids: [owner.uid],
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+}
+
+export async function getTeam(teamId) {
+  try {
+    const snap = await getDoc(doc(firestore, 'teams', teamId));
+    return snap.exists() ? { id: snap.id, kind: 'team', ...snap.data() } : null;
+  } catch { return null; }
+}
+
+export function watchTeam(teamId, cb) {
+  return onSnapshot(doc(firestore, 'teams', teamId), (snap) => cb(snap.exists() ? { id: snap.id, kind: 'team', ...snap.data() } : null), () => cb(null));
+}
+
+export function watchMyTeams(uid, cb) {
+  return onSnapshot(query(collection(firestore, 'teams'), where('memberUids', 'array-contains', uid)),
+    (snap) => cb(snap.docs.map((d) => ({ id: d.id, kind: 'team', ...d.data() }))), (err) => { console.warn('[cloud] teams:', err.message); cb([]); });
+}
+
+export const renameTeam = (teamId, name) => updateDoc(doc(firestore, 'teams', teamId), { name: String(name).slice(0, 60), updatedAt: serverTimestamp() });
+
 // ---------- invites (owner side) ----------
+// A share target: { kind: 'project' | 'team', id, name, members }.
+const targetFields = (t) => (t.kind === 'team' ? { teamId: t.id, teamName: t.name } : { projectId: t.id, projectName: t.name });
+
 export async function inviteByEmail(project, owner, email, role) {
   const clean = String(email).trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(clean)) throw new Error('Enter a valid email address.');
   if (clean === (owner.email || '').toLowerCase()) throw new Error("That's your own email.");
   if (Object.values(project.members || {}).some((m) => m.email === clean)) throw new Error('They are already a member.');
   await addDoc(collection(firestore, 'invites'), {
-    projectId: project.id,
-    projectName: project.name,
+    ...targetFields(project),
     ownerId: owner.uid,
     email: clean,
     role,
@@ -300,9 +337,12 @@ export async function inviteByEmail(project, owner, email, role) {
   });
 }
 
-export function watchProjectInvites(projectId, ownerId, cb) {
-  return onSnapshot(query(collection(firestore, 'invites'), where('ownerId', '==', ownerId), where('projectId', '==', projectId), where('status', '==', 'pending')),
-    (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), () => cb([]));
+// Pending invites of a target. A team's managers all see every team invite.
+export function watchProjectInvites(t, ownerId, cb) {
+  const q = t.kind === 'team'
+    ? query(collection(firestore, 'invites'), where('teamId', '==', t.id), where('status', '==', 'pending'))
+    : query(collection(firestore, 'invites'), where('ownerId', '==', ownerId), where('projectId', '==', t.id), where('status', '==', 'pending'));
+  return onSnapshot(q, (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), () => cb([]));
 }
 
 export const revokeInvite = (inviteId) => deleteDoc(doc(firestore, 'invites', inviteId));
@@ -318,12 +358,12 @@ const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I
 const newCode = () => Array.from(crypto.getRandomValues(new Uint32Array(8)), (n) => CODE_CHARS[n % CODE_CHARS.length]).join('');
 export const formatCode = (code) => `${code.slice(0, 4)}-${code.slice(4)}`;
 
-export async function createInviteLink(projectId, ownerId, { role = 'editor', expiresInDays = 7, requiresApproval = false } = {}) {
+export async function createInviteLink(t, ownerId, { role = 'editor', expiresInDays = 7, requiresApproval = false } = {}) {
   for (let attempt = 0; attempt < 4; attempt++) {
     const code = newCode();
     try {
       await setDoc(doc(firestore, 'inviteLinks', code), {
-        projectId,
+        ...(t.kind === 'team' ? { teamId: t.id } : { projectId: t.id }),
         ownerId,
         role,
         requiresApproval: !!requiresApproval,
@@ -339,16 +379,19 @@ export async function createInviteLink(projectId, ownerId, { role = 'editor', ex
   return null;
 }
 
-export function watchInviteLinks(projectId, ownerId, cb) {
+export function watchInviteLinks(t, ownerId, cb) {
+  const q = t.kind === 'team'
+    ? query(collection(firestore, 'inviteLinks'), where('teamId', '==', t.id))
+    : query(collection(firestore, 'inviteLinks'), where('ownerId', '==', ownerId), where('projectId', '==', t.id));
   // pending = shown before the server has saved it (not usable yet)
-  return onSnapshot(query(collection(firestore, 'inviteLinks'), where('ownerId', '==', ownerId), where('projectId', '==', projectId)), { includeMetadataChanges: true },
+  return onSnapshot(q, { includeMetadataChanges: true },
     (snap) => cb(snap.docs.map((d) => ({ code: d.id, ...d.data(), pending: d.metadata.hasPendingWrites })).filter((l) => !l.revoked)), () => cb([]));
 }
 
 export const revokeInviteLink = (code) => updateDoc(doc(firestore, 'inviteLinks', code), { revoked: true });
 
-export function watchJoinRequests(projectId, cb) {
-  return onSnapshot(collection(firestore, COLLECTIONS.PROJECTS, projectId, 'joinRequests'),
+export function watchJoinRequests(t, cb) {
+  return onSnapshot(collection(firestore, t.kind === 'team' ? 'teams' : COLLECTIONS.PROJECTS, t.id, 'joinRequests'),
     (snap) => cb(snap.docs.map((d) => ({ uid: d.id, ...d.data() }))), () => cb([]));
 }
 

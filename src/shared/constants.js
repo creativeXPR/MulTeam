@@ -32,6 +32,7 @@ const IPC = Object.freeze({
   WS_RENAME: 'workspaces:rename',
   WS_SET_CURRENT: 'workspaces:setCurrent',
   WS_DELETE: 'workspaces:delete',
+  WS_UPSERT_TEAM: 'workspaces:upsertTeam',
   LIST_FILES: 'search:listFiles',
   SEARCH_TEXT: 'search:text',
   GIT_STATUS: 'git:status',

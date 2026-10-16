@@ -186,6 +186,23 @@ async function setCurrentWorkspace(id) {
   return writeWorkspaces(data);
 }
 
+// Team workspaces: a local workspace can be linked to a shared team
+// (teamId; the owner's team uses the workspace's own id). For teams you were
+// invited to, a local workspace is created to hold them (joined: true).
+async function upsertTeamWorkspace({ id, name, teamId, joined }) {
+  const data = await readWorkspaces();
+  let ws = data.workspaces.find((w) => w.id === id || (teamId && w.teamId === teamId));
+  if (!ws) {
+    ws = { id: String(id), name: cleanName(name), createdAt: Date.now() };
+    data.workspaces.push(ws);
+  }
+  if (name) ws.name = cleanName(name);
+  if (teamId === null) { delete ws.teamId; delete ws.joined; } else if (teamId) ws.teamId = String(teamId);
+  if (joined) ws.joined = true;
+  await writeWorkspaces(data);
+  return ws;
+}
+
 // Deleting a workspace never deletes projects or folders: its projects move
 // to `moveTo` (another workspace).
 async function deleteWorkspace(id, moveTo) {
@@ -255,6 +272,7 @@ function setupProjectHandlers(ipcMain, IPC) {
   ipcMain.handle(IPC.WS_RENAME, (_e, id, name) => renameWorkspace(String(id), name));
   ipcMain.handle(IPC.WS_SET_CURRENT, (_e, id) => setCurrentWorkspace(String(id)));
   ipcMain.handle(IPC.WS_DELETE, (_e, id, moveTo) => deleteWorkspace(String(id), moveTo ? String(moveTo) : null));
+  ipcMain.handle(IPC.WS_UPSERT_TEAM, (_e, ws) => upsertTeamWorkspace(ws || {}));
   ipcMain.handle(IPC.LIST_PROJECTS, () => listProjects());
   ipcMain.handle(IPC.GET_PROJECT, (_e, id) => getProject(id));
   ipcMain.handle(IPC.CREATE_PROJECT, (_e, params) => createProject(params));
