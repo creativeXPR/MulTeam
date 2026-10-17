@@ -40,6 +40,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updateProject: (id, patch) => ipcRenderer.invoke(IPC.UPDATE_PROJECT, id, patch),
   deleteProjectLocal: (id, options) => ipcRenderer.invoke(IPC.DELETE_PROJECT_LOCAL, id, options),
   duplicateProject: (id) => ipcRenderer.invoke(IPC.DUPLICATE_PROJECT, id),
+  sessionFolder: (sid) => ipcRenderer.invoke(IPC.SESSION_FOLDER, sid),
+  removeSessionFolder: (sid) => ipcRenderer.invoke(IPC.SESSION_FOLDER_REMOVE, sid),
   workspaces: {
     list: () => ipcRenderer.invoke(IPC.WS_LIST),
     create: (name) => ipcRenderer.invoke(IPC.WS_CREATE, name),

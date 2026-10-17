@@ -282,7 +282,7 @@
 
             <nav class="tutorial__toc">
               <a href="#h-start">Getting started</a><a href="#h-edit">Editing</a><a href="#h-run">Run</a>
-              <a href="#h-collab">Collaborate</a><a href="#h-git">Source Control</a><a href="#h-custom">Customize</a>
+              <a href="#h-collab">Collaborate</a><a href="#h-live">Live sessions</a><a href="#h-git">Source Control</a><a href="#h-custom">Customize</a>
               <a href="#h-panels">Panels &amp; terminal</a><a href="#h-keys">Keyboard shortcuts</a>
             </nav>
 
@@ -329,6 +329,18 @@
                   <li><b>Live branches</b>: each Git branch has its own live session. Switching branch switches session; changes Git makes (checkout, pull) aren't re-shared.</li>
                   <li><b>Whole-project sync</b>: files with live edits stay in sync on everyone's disk, open or not. Edits, new files, renames and deletes made anywhere are shared; deletes from teammates go to the Recycle Bin, and a differing local copy is backed up first.</li>
                   <li><b>Projects without Git</b>: synced whole (up to 400 files). <code>.env</code>, <code>node_modules</code> and build output always stay local.</li>
+                </ul>
+              </section>
+
+              <section class="help__sec">
+                <h3 id="h-live">Live sessions</h3>
+                <ul>
+                  <li><b>Start</b>: with a local project open, choose <b>File → Start Live Session…</b> (or right-click the project). The link is copied for you; send it to whoever you want to pair with.</li>
+                  <li><b>Guests</b>: anyone with the link can ask to join, with or without an account (a name is enough). You admit or deny each one from <b>Live</b> in the footer.</li>
+                  <li><b>Control</b>: guests can edit by default. Make anyone read-only, allow editing again, or remove them from the same panel.</li>
+                  <li><b>Joining</b>: open the <code>multeam://session/…</code> link, paste it into <b>Join project</b>, or use <b>Live Share: Join Live Session…</b> in the command palette. You get the host's whole project; your edits are saved on their computer.</li>
+                  <li><b>Ending</b>: <b>End session</b> (or closing the project) disconnects everyone and deletes the session. Guests' temporary copies are removed; nothing stays on their computers.</li>
+                  <li>Cloud projects are already live for their members, so use <b>Share</b> for them instead.</li>
                 </ul>
               </section>
 

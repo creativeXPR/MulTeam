@@ -2,6 +2,7 @@ import { watchAuthState, watchCloudConnection, signOut, createCloudProject, dele
 import { fileKeyFor } from './sync.js';
 import { initCollab } from './collab.js';
 import { initGitHubAccount } from './githubAccount.js';
+import { initSessions, sessionIdFrom } from './session.js';
 import { createLiveProject } from './liveProject.js';
 import { requireAuth, openSignIn } from './authModal.js';
 import { FileDocument, EditorView, setMonacoTheme } from './editor.js';
@@ -323,7 +324,7 @@ function renderProjectsGrid() {
           <div class="project__path">${escapeHtml(p.folderPath)}</div>
         </div>
       </div>
-      <span class="pstatus ${p.cloudEnabled ? 'cloud' : 'local'}"><i></i>${p.cloudEnabled ? 'Cloud' : 'Local'}</span>
+      <span class="pstatus ${p.cloudEnabled || p.session ? 'cloud' : 'local'}"><i></i>${p.session ? 'Live' : p.cloudEnabled ? 'Cloud' : 'Local'}</span>
       <div class="project__foot">
         <span class="project__date">Opened ${date}</span>
         <div class="project__row-actions">
@@ -633,6 +634,7 @@ function projectMenu(p) {
   const others = workspaces.filter((w) => w.id !== wsOf(p));
   return [
     { label: 'Open', onClick: () => openProjectView(p) },
+    ...(p.session || p.cloudEnabled ? [] : [{ label: 'Start Live Session…', onClick: async () => { if (project?.id !== p.id) await openProjectView(p); if (project?.id === p.id) sessions.startSession(); } }]),
     p.cloudEnabled
       ? { label: 'Share…', onClick: () => collab.openShare(p.id) }
       : { label: 'Share… (turn on cloud sync first)', onClick: () => openProjectModal('edit', p) },
@@ -832,7 +834,35 @@ let branchCheckTimer = null;
 
 const relOf = (filePath) => filePath.slice(rootFolder.length).replace(/^[\\/]+/, '').split('\\').join('/');
 
+// Plain file access for the sync engine (no Git): live sessions use it.
+function liveFsApi() {
+  const api = window.electronAPI;
+  return {
+    readFile: api.readFile, writeFile: api.writeFile, readDir: api.readDir, createDirectory: api.createDirectory,
+    trashEntry: api.trashEntry, backupFile: api.backupFile, headContent: async () => null, listFiles: api.listFiles
+  };
+}
+
+// A live-session guest: their temporary project syncs with the session.
+function startSessionSync() {
+  if (liveSyncReady) return liveSyncReady;
+  const s = project.session;
+  liveRole = s.role;
+  liveSync = createLiveProject({
+    projectId: `session-${s.sid}`, root: rootFolder, branch: null, isGit: false, uid: currentUser.uid,
+    canEdit: s.role === 'editor', api: liveFsApi(), toast, basePath: `sessions/${s.sid}`,
+    onDenied: () => { if (!liveDeniedShown) { liveDeniedShown = true; toast("You can't reach this live session any more.", 'error'); } }
+  });
+  liveSyncReady = Promise.resolve(liveSync);
+  return liveSyncReady;
+}
+
+// The host's live session engine (session.js), when one is running.
+let hostEngine = null;
+let sessions = null; // set up below, after collab
+
 function startLiveSync() {
+  if (project?.session && currentUser) return startSessionSync();
   if (!project?.cloudEnabled || !currentUser) return Promise.resolve(null);
   if (liveSyncReady) return liveSyncReady;
   const p = project;
@@ -908,27 +938,32 @@ function scheduleBranchCheck() {
     if (!liveSync || !rootFolder) return;
     const st = await window.electronAPI.git.status(rootFolder).catch(() => null);
     if (!st?.isRepo || !liveSync || st.branch === liveSync.branch) return;
-    const reopen = orderedGroups().flatMap((g) => g.tabs);
-    const active = activeTabPath;
-    closeAllEditors({ save: false });
-    stopLiveSync();
-    await startLiveSync();
-    for (const path of reopen) if (!samePath(path, active)) await openFile(path).catch(() => {});
-    if (active) openFile(active).catch(() => {});
+    await reopenEditors({ save: false, between: async () => { stopLiveSync(); await startLiveSync(); } });
     toast(`Switched to branch ${st.branch}. You're now in its live session.`);
   }, 700);
 }
 
-async function openProjectView(p) {
+// Close and reopen every editor (e.g. so they bind to a different live
+// session), running `between` while none are open.
+async function reopenEditors({ save = true, between } = {}) {
+  const reopen = orderedGroups().flatMap((g) => g.tabs);
+  const active = activeTabPath;
+  closeAllEditors({ save });
+  await between?.();
+  for (const path of reopen) if (!samePath(path, active)) await openFile(path).catch(() => {});
+  if (active) await openFile(active).catch(() => {});
+}
+
+async function openProjectView(p, { ask = true } = {}) {
   if (project && project.id === p.id) { go('editor'); return; }
 
   // Only one project session stays live at a time (see the plan's scope
   // note) — switching away closes the current one, so make that consequence
   // explicit rather than silently dropping whatever was open.
   if (project) {
-    const proceed = await confirmDialog({
+    const proceed = !ask || await confirmDialog({
       title: `Switch to "${p.name}"?`,
-      message: `This closes your session in "${project.name}". Pending changes are saved first, but its open tabs won't stay open.`,
+      message: `This closes your session in "${project.name}". Pending changes are saved first, but its open tabs won't stay open.${sessions?.isHosting() ? ' Your live session ends.' : ''}`,
       confirmLabel: 'Switch'
     });
     if (!proceed) return;
@@ -949,7 +984,7 @@ async function openProjectView(p) {
   scm.refresh();
   document.getElementById('explorerActs').hidden = false;
   window.electronAPI.watchPath(rootFolder).catch(() => { /* explorer still works, just no auto-refresh */ });
-  if (p.cloudEnabled && currentUser) startLiveSync();
+  if ((p.cloudEnabled || p.session) && currentUser) startLiveSync();
 }
 
 function closeProjectView() {
@@ -960,6 +995,8 @@ function closeProjectView() {
   document.getElementById('explorerActs').hidden = true;
   closeAllEditors({ save: true });
   stopLiveSync();
+  const closing = project;
+  sessions?.projectClosing(closing);
   project = null;
   rootFolder = null;
   projectOpenedAt = null;
@@ -1338,12 +1375,12 @@ async function openDoc(filePath) {
   rec.opening = (async () => {
     const content = await window.electronAPI.readFile(filePath);
     const rel = relOf(filePath);
-    const engine = project?.cloudEnabled ? await startLiveSync() : null;
+    const engine = project?.cloudEnabled || project?.session ? await startLiveSync() : hostEngine;
     // ignored files (.env, build output…) and big/binary files stay local
     const cloud = !!engine && engine.isShared(rel) && typeof content === 'string' && content.length <= 512 * 1024;
     const fileKey = fileKeyFor(rel);
     const docId = `${project.id}__${fileKey}`;
-    const role = cloud ? liveRole : null;
+    const role = cloud ? (engine === hostEngine ? 'owner' : liveRole) : null;
     const doc = new FileDocument(filePath, {
       live: cloud ? { acquire: (seed) => engine.acquire(rel, seed), release: () => engine.release(rel) } : null,
       currentUser,
@@ -1362,7 +1399,7 @@ async function openDoc(filePath) {
       clearTimeout(rec.saveTimer);
       rec.saveTimer = setTimeout(() => saveActiveFile(doc.filePath), 800);
     });
-    if (cloud) {
+    if (cloud && project.cloudEnabled) {
       upsertDocumentMeta(docId, { projectId: project.id, path: rel, language: doc.model.getLanguageId(), userId: currentUser.uid }).catch(() => {});
     }
     return doc;
@@ -1376,6 +1413,7 @@ const shownAnywhere = (p) => [...groups.values()].some((g) => g.activePath && sa
 function writeDoc(doc) {
   const text = doc.getValue();
   if (rootFolder && liveSync) liveSync.noteWritten(relOf(doc.filePath), text); // not an outside change
+  if (rootFolder && hostEngine) hostEngine.noteWritten(relOf(doc.filePath), text);
   return window.electronAPI.writeFile(doc.filePath, text).then(() => { doc.diskText = text; });
 }
 
@@ -2075,7 +2113,7 @@ function renderDashboardCards() {
   const liveEmpty = document.getElementById('liveSessionEmpty');
   const avatarsEl = document.getElementById('liveAvatars');
   const avatarsEmptyEl = document.getElementById('liveAvatarsEmpty');
-  const awareness = project && project.cloudEnabled && activeWorkspace ? activeWorkspace.getAwareness() : null;
+  const awareness = project && (project.cloudEnabled || project.session || hostEngine) && activeWorkspace ? activeWorkspace.getAwareness() : null;
 
   if (awareness) {
     const states = [...awareness.getStates().values()].filter((s) => s.user);
@@ -2365,6 +2403,8 @@ const palette = initCommandPalette({
     { label: 'Workspaces: New Workspace…', action: () => setTimeout(newWorkspace, 0) },
     { label: 'Share Project…', action: () => setTimeout(() => (project?.cloudEnabled ? collab.openShare(project.id) : toast('Open a cloud project first (turn on cloud sync in Edit project)', 'error')), 0) },
     { label: 'Join Project…', action: () => setTimeout(() => collab.openJoin(), 0) },
+    { label: 'Live Share: Start Live Session', action: () => setTimeout(() => sessions.startSession(), 0) },
+    { label: 'Live Share: Join Live Session…', action: () => setTimeout(async () => { const link = await promptDialog({ title: 'Join a live session', label: 'Session link', placeholder: 'multeam://session/…', confirmLabel: 'Join' }); const sid = sessionIdFrom(link); if (sid) sessions.joinSession(sid); else if (link) toast("That isn't a live session link.", 'error'); }, 0) },
     { label: 'Toggle theme', action: () => applyTheme(getEffectiveTheme() === 'dark' ? 'light' : 'dark', { user: true }) },
     { label: 'Open settings', action: () => openSettings() },
     { label: 'Toggle panel', hint: 'Ctrl+J', action: () => toggleProblems() },
@@ -2419,6 +2459,7 @@ window.electronAPI.onFileExternalChange(({ path: watched, eventType, filename, g
   if (!rootFolder || !samePath(watched, rootFolder)) return;
   scm.refreshSoon();
   liveSync?.onDiskEvent({ filename, git });
+  hostEngine?.onDiskEvent({ filename, git });
   if (git) { if (liveSync) scheduleBranchCheck(); return; }
   const changed = filename ? joinPath(rootFolder, String(filename).replace(/\\/g, '/')) : null;
   if (changed && documents.has(pathKey(changed))) {
@@ -2593,6 +2634,8 @@ initMenubar(document.getElementById('menubar'), [
     '-',
     { label: 'Share Project…', run: () => collab.openShare(project.id), enabled: () => !!project?.cloudEnabled },
     { label: 'Join Project…', run: () => collab.openJoin() },
+    { label: 'Start Live Session…', run: () => sessions.startSession(), enabled: () => !!project && !project.session && !project.cloudEnabled && !sessions.isHosting() },
+    { label: 'End Live Session…', run: () => sessions.endSession(), enabled: () => sessions.isHosting() },
     '-',
     { label: 'Save', kbd: 'Ctrl+S', run: () => saveActiveFile(activeTabPath, { explicit: true }), enabled: hasEditor },
     { label: 'Save As…', run: () => saveFileAs(activeTabPath), enabled: hasEditor },
@@ -2721,6 +2764,7 @@ const github = initGitHubAccount({ toast, escapeHtml });
 
 collab = initCollab({
   github,
+  onSessionLink: (sid) => sessions?.joinSession(sid),
   toast,
   confirmDialog,
   escapeHtml,
@@ -2762,6 +2806,57 @@ collab = initCollab({
   }
 });
 collab.onAuth(currentUser);
+
+// ---------- live sessions (stage 4) ----------
+sessions = initSessions({
+  toast,
+  confirmDialog,
+  promptDialog,
+  escapeHtml,
+  requireAuth,
+  getProject: () => project,
+  getRoot: () => rootFolder,
+  getUser: () => currentUser,
+  makeApi: liveFsApi,
+  // host: open editors move onto the session (or off it when it ends)
+  setHostEngine: async (engine) => {
+    // the folder is shared first, so open editors bind to complete docs
+    await engine?.treeShared;
+    hostEngine = engine;
+    if (project && !project.cloudEnabled) await reopenEditors({ save: true });
+  },
+  // guest: the session as a temporary project
+  openSessionProject: async ({ sid, role, hostName, projectName, reopen }) => {
+    const id = `session-${sid}`;
+    if (reopen && project?.id === id) {
+      project.session = { ...project.session, role };
+      await reopenEditors({ save: true, between: async () => { stopLiveSync(); await startLiveSync(); } });
+      return;
+    }
+    const folder = await window.electronAPI.sessionFolder(sid);
+    await window.electronAPI.deleteProjectLocal(id).catch(() => {});
+    const rec = await window.electronAPI.createProject({ id, name: `${projectName} (${hostName}'s session)`, folderPath: folder, cloudEnabled: false, session: { sid, role, hostName }, workspaceId: currentWsId });
+    await refreshProjects();
+    await openProjectView(rec, { ask: false }); // joining was the choice
+  },
+  closeSessionProject: async (sid) => {
+    const id = `session-${sid}`;
+    if (project?.id === id) { closeProjectView(); go('dashboard'); }
+    await window.electronAPI.deleteProjectLocal(id).catch(() => {});
+    await window.electronAPI.removeSessionFolder(sid).catch(() => {});
+    await refreshProjects();
+  }
+});
+
+// Temporary session projects left behind (MulTeam closed mid-session).
+(async () => {
+  for (const p of await window.electronAPI.listProjects()) {
+    if (!p.ephemeral || !p.session) continue;
+    await window.electronAPI.deleteProjectLocal(p.id).catch(() => {});
+    await window.electronAPI.removeSessionFolder(p.session.sid).catch(() => {});
+  }
+  await refreshProjects();
+})();
 document.getElementById('joinProjectBtn').addEventListener('click', () => collab.openJoin());
 
 

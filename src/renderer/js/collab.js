@@ -19,7 +19,7 @@ const codeFrom = (text) => {
 };
 const initialOf = (s) => (String(s || '?').trim()[0] || '?').toUpperCase();
 
-export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireAuth, getLocalProjects, refreshProjects, openProjectById, chooseFolder, createLocalProject, removeLocalProject, github, onTeamsChanged = () => {}, onJoinedTeam = () => {}, onLeftTeam = () => {}, workspaceForTeam = () => null }) {
+export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireAuth, getLocalProjects, refreshProjects, openProjectById, chooseFolder, createLocalProject, removeLocalProject, github, onTeamsChanged = () => {}, onJoinedTeam = () => {}, onLeftTeam = () => {}, workspaceForTeam = () => null, onSessionLink = () => {} }) {
   const esc = escapeHtml;
   const cleanErr = (err) => String(err?.message || err).replace(/^(FirebaseError: )?/, '');
 
@@ -494,6 +494,9 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
   $('join-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     $('join-error').textContent = '';
+    // a live-session link pasted here joins the session instead
+    const sessionMatch = /multeam:\/\/session\/([a-z0-9]{6,40})/i.exec($('join-code').value);
+    if (sessionMatch) { closeJoin(); onSessionLink(sessionMatch[1]); return; }
     const code = codeFrom($('join-code').value);
     if (!code) { $('join-error').textContent = 'That doesn’t look like an invite code (e.g. AB12-CD34).'; return; }
     const btn = $('join-submit');
@@ -598,6 +601,9 @@ export function initCollab({ toast, confirmDialog, escapeHtml, getUser, requireA
   function handleLink(url) {
     const m = /^multeam:\/\/join\/([A-Za-z0-9-]+)/i.exec(String(url || ''));
     if (m) openJoin(m[1]);
+    // multeam://session/{id} — a live session (session.js)
+    const s = /^multeam:\/\/session\/([a-z0-9]{6,40})/i.exec(String(url || ''));
+    if (s) onSessionLink(s[1]);
   }
   window.electronAPI.onOpenLink?.(handleLink);
   window.electronAPI.takeLaunchLink?.().then(handleLink).catch(() => {});

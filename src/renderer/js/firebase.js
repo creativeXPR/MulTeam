@@ -10,7 +10,8 @@ import {
   updateProfile,
   sendEmailVerification,
   connectAuthEmulator,
-  signInWithCredential
+  signInWithCredential,
+  signInAnonymously
 } from 'firebase/auth';
 import {
   getFirestore,
@@ -140,6 +141,14 @@ export async function signInForTests({ uid, email, name }) {
   return (await signInWithCredential(auth, GoogleAuthProvider.credential(JSON.stringify({ sub: uid, email, email_verified: true, name })))).user;
 }
 if (EMULATORS) window.__multeamTest = { signIn: signInForTests };
+
+// Live-session guests without an account: an anonymous sign-in with the
+// name they typed (needs the Anonymous provider enabled in Firebase Auth).
+export async function signInAsGuest(name) {
+  const { user } = await signInAnonymously(auth);
+  await updateProfile(user, { displayName: String(name || 'Guest').slice(0, 40) });
+  return user;
+}
 
 export function signOut() {
   return firebaseSignOut(auth);

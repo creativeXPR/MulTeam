@@ -45,7 +45,9 @@ async function writeRecord(record) {
 
 // `id` is passed when linking a cloud project you joined to a local folder
 // (local and cloud records share the id); `joined` marks it as not yours.
-async function createProject({ id, name, folderPath, cloudEnabled, workspaceId, joined }) {
+// `session`: a live-session guest's temporary project ({ sid, role, hostName }),
+// removed when the session ends (`ephemeral`).
+async function createProject({ id, name, folderPath, cloudEnabled, workspaceId, joined, session }) {
   const now = Date.now();
   if (id !== undefined) {
     if (!/^[A-Za-z0-9_-]{6,64}$/.test(String(id))) throw new Error('Invalid project id.');
@@ -57,6 +59,7 @@ async function createProject({ id, name, folderPath, cloudEnabled, workspaceId, 
     folderPath,
     cloudEnabled: !!cloudEnabled,
     ...(joined ? { joined: true } : {}),
+    ...(session ? { session: { sid: String(session.sid), role: session.role === 'viewer' ? 'viewer' : 'editor', hostName: String(session.hostName || '').slice(0, 80) }, ephemeral: true } : {}),
     workspaceId: workspaceId || (await readWorkspaces()).currentId,
     createdAt: now,
     lastOpenedAt: now
@@ -266,7 +269,23 @@ async function forgetPluginProject(pluginId) {
   }
 }
 
+// A live-session guest's files live in a scratch folder that is deleted
+// when the session ends (or on the next start, if MulTeam was closed).
+const sessionDir = (sid) => path.join(os.tmpdir(), 'multeam-sessions', String(sid).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64));
+async function sessionFolder(sid) {
+  const dir = sessionDir(sid);
+  await fs.rm(dir, { recursive: true, force: true });
+  await fs.mkdir(dir, { recursive: true });
+  return dir;
+}
+async function removeSessionFolder(sid) {
+  await fs.rm(sessionDir(sid), { recursive: true, force: true });
+  return true;
+}
+
 function setupProjectHandlers(ipcMain, IPC) {
+  ipcMain.handle(IPC.SESSION_FOLDER, (_e, sid) => sessionFolder(sid));
+  ipcMain.handle(IPC.SESSION_FOLDER_REMOVE, (_e, sid) => removeSessionFolder(sid));
   ipcMain.handle(IPC.WS_LIST, () => readWorkspaces());
   ipcMain.handle(IPC.WS_CREATE, (_e, name) => createWorkspace(name));
   ipcMain.handle(IPC.WS_RENAME, (_e, id, name) => renameWorkspace(String(id), name));

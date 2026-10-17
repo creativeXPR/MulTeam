@@ -227,7 +227,8 @@ export function createLiveProject({ projectId, root, branch, isGit, uid, canEdit
     backgrounds.add(rel);
     let disk = null;
     try { disk = await api.readFile(abs(rel)); } catch { /* not on this disk yet */ }
-    const d = acquire(rel, isText(disk) ? disk : '');
+    // not on this disk yet: wait for the doc rather than seed an empty one
+    const d = acquire(rel, disk === null ? null : isText(disk) ? disk : '');
     await reconcile(rel, d, disk);
   }
 

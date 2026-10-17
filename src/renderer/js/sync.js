@@ -95,6 +95,9 @@ export class FirebaseProvider {
   }
 
   async _seedIfNew(seedText) {
+    // null: this client has no copy of the file, so it must never create the
+    // doc (an empty seed could win the race against the real one); it waits.
+    if (seedText === null) return true;
     const [snap, updates] = await Promise.all([get(this.snapshotRef), get(this.updatesRef)]);
     if (snap.exists() || updates.exists()) return true;
     const seed = new Y.Doc();
