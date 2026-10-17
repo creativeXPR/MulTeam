@@ -50,13 +50,15 @@ export function fileKeyFor(relativePath) {
 
 export class FirebaseProvider {
   // seedText: the file's text on disk, used only if nobody has a live doc yet
-  constructor({ projectId, branchKey, fileKey, seedText = '' }, ydoc, { onDenied, db = rtdb } = {}) {
+  // basePath (optional): where the session's docs live instead of a project
+  // branch, e.g. sessions/{id} for a live session
+  constructor({ projectId, branchKey, fileKey, basePath, seedText = '' }, ydoc, { onDenied, db = rtdb } = {}) {
     this.doc = ydoc;
     this.awareness = new Awareness(ydoc);
     this.connected = false;
     this.onDenied = onDenied;
 
-    this.docRef = ref(db, `projects/${projectId}/b/${branchKey}/docs/${fileKey}`);
+    this.docRef = ref(db, `${basePath || `projects/${projectId}/b/${branchKey}`}/docs/${fileKey}`);
     this.updatesRef = child(this.docRef, 'updates');
     this.snapshotRef = child(this.docRef, 'snapshot');
     this.awarenessRef = child(this.docRef, 'awareness');

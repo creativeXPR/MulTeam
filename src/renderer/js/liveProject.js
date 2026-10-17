@@ -81,11 +81,13 @@ export function mergeLocalEdit(ytext, base, local, origin) {
   return true;
 }
 
-export function createLiveProject({ projectId, root, branch, isGit, uid, canEdit, api, toast, onDenied, db = rtdb }) {
+// basePath (optional): sync into another place than the project's branch —
+// a live session (sessions/{id}) uses the same engine.
+export function createLiveProject({ projectId, root, branch, isGit, uid, canEdit, api, toast, onDenied, db = rtdb, basePath = null }) {
   const sep = root.includes('\\') ? '\\' : '/';
   const abs = (rel) => root.replace(/[\\/]+$/, '') + sep + rel.split('/').join(sep);
   const branchKey = fileKeyFor(isGit ? branch || 'HEAD' : '_project');
-  const base = `projects/${projectId}/b/${branchKey}`;
+  const base = basePath || `projects/${projectId}/b/${branchKey}`;
   const filesRef = ref(db, `${base}/files`);
   const client = Math.random().toString(36).slice(2, 10);
   const LOCAL = { local: true }; // transaction origin for changes made here
@@ -126,7 +128,7 @@ export function createLiveProject({ projectId, root, branch, isGit, uid, canEdit
     let d = docs.get(rel);
     if (!d) {
       const ydoc = new Y.Doc();
-      const provider = new FirebaseProvider({ projectId, branchKey, fileKey: fileKeyFor(rel), seedText }, ydoc, { onDenied, db });
+      const provider = new FirebaseProvider({ projectId, branchKey, basePath: base, fileKey: fileKeyFor(rel), seedText }, ydoc, { onDenied, db });
       d = { ydoc, provider, refs: 0, writeTimer: null, markedLive: false };
       const ytext = ydoc.getText('monaco');
       // teammates' changes → disk

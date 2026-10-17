@@ -13,6 +13,63 @@
       }
     },
 
+    "sessions": {
+      "$sid": {
+        ".read": "auth != null && (data.child('hostUid').val() === auth.uid || data.child('members').child(auth.uid).child('status').val() === 'admitted')",
+        ".write": "auth != null && data.child('hostUid').val() === auth.uid && !newData.exists()",
+
+        "hostUid": {
+          ".write": "auth != null && !data.exists() && newData.val() === auth.uid"
+        },
+
+        "info": {
+          ".read": "auth != null",
+          ".write": "auth != null && (root.child('sessions').child($sid).child('hostUid').val() === auth.uid || (!root.child('sessions').child($sid).child('hostUid').exists() && newData.parent().child('hostUid').val() === auth.uid))",
+          ".validate": "newData.hasChildren(['projectName', 'hostName', 'createdAt']) && newData.child('projectName').isString() && newData.child('projectName').val().length <= 120 && newData.child('hostName').isString() && newData.child('hostName').val().length <= 80"
+        },
+
+        "members": {
+          "$uid": {
+            ".read": "auth != null && $uid === auth.uid",
+            ".write": "auth != null && (root.child('sessions').child($sid).child('hostUid').val() === auth.uid || ($uid === auth.uid && (!newData.exists() || (!data.exists() && newData.child('status').val() === 'pending'))))",
+            ".validate": "newData.hasChildren(['name', 'status', 'role', 'at']) && newData.child('name').isString() && newData.child('name').val().length <= 80 && (newData.child('status').val() === 'pending' || newData.child('status').val() === 'admitted' || newData.child('status').val() === 'denied') && (newData.child('role').val() === 'editor' || newData.child('role').val() === 'viewer')"
+          }
+        },
+
+        "files": {
+          "$fileKey": {
+            ".write": "auth != null && (root.child('sessions').child($sid).child('hostUid').val() === auth.uid || (root.child('sessions').child($sid).child('members').child(auth.uid).child('status').val() === 'admitted' && root.child('sessions').child($sid).child('members').child(auth.uid).child('role').val() === 'editor'))",
+            ".validate": "newData.hasChildren(['path', 'kind', 'state', 'by', 'at']) && newData.child('path').isString() && newData.child('path').val().length <= 1000 && (newData.child('kind').val() === 'file' || newData.child('kind').val() === 'dir') && (newData.child('state').val() === 'live' || newData.child('state').val() === 'deleted') && newData.child('by').val() === auth.uid && newData.child('at').isNumber()"
+          }
+        },
+
+        "docs": {
+          "$fileKey": {
+            ".write": "auth != null && !newData.exists() && (root.child('sessions').child($sid).child('hostUid').val() === auth.uid || (root.child('sessions').child($sid).child('members').child(auth.uid).child('status').val() === 'admitted' && root.child('sessions').child($sid).child('members').child(auth.uid).child('role').val() === 'editor'))",
+
+            "updates": {
+              "$pushId": {
+                ".write": "auth != null && (root.child('sessions').child($sid).child('hostUid').val() === auth.uid || (root.child('sessions').child($sid).child('members').child(auth.uid).child('status').val() === 'admitted' && root.child('sessions').child($sid).child('members').child(auth.uid).child('role').val() === 'editor')) && (!data.exists() || !newData.exists())",
+                ".validate": "newData.hasChildren(['state', 'origin']) && newData.child('state').isString() && newData.child('state').val().length <= 1000000 && newData.child('origin').isNumber()"
+              }
+            },
+
+            "snapshot": {
+              ".write": "auth != null && (root.child('sessions').child($sid).child('hostUid').val() === auth.uid || (root.child('sessions').child($sid).child('members').child(auth.uid).child('status').val() === 'admitted' && root.child('sessions').child($sid).child('members').child(auth.uid).child('role').val() === 'editor'))",
+              ".validate": "newData.hasChildren(['state', 'updatedAt']) && newData.child('state').isString()"
+            },
+
+            "awareness": {
+              "$clientId": {
+                ".write": "auth != null && (root.child('sessions').child($sid).child('hostUid').val() === auth.uid || root.child('sessions').child($sid).child('members').child(auth.uid).child('status').val() === 'admitted')",
+                ".validate": "newData.isString() && newData.val().length <= 20000"
+              }
+            }
+          }
+        }
+      }
+    },
+
     "projects": {
       "$projectId": {
         ".write": "auth != null && !newData.exists() && root.child('projectMembers').child($projectId).child(auth.uid).val() === 'owner'",
