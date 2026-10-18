@@ -121,6 +121,9 @@ export function initSessions({ toast, confirmDialog, promptDialog, escapeHtml, g
       if (act === 'kick') {
         if (await confirmDialog({ title: `Remove ${b.dataset.name}?`, message: 'They leave the session right away. Changes they already made stay in your files.', confirmLabel: 'Remove', danger: true })) {
           await remove(ref$(`sessions/${hosting.sid}/members/${b.dataset.uid}`));
+          // and their presence (they can't remove it themselves any more)
+          const pres = (await get(ref$(`sessions/${hosting.sid}/presence`)).catch(() => null))?.val() || {};
+          for (const [k, v] of Object.entries(pres)) if (v?.uid === b.dataset.uid) remove(ref$(`sessions/${hosting.sid}/presence/${k}`)).catch(() => {});
         }
       }
       if (act === 'end') endSession();
@@ -278,6 +281,7 @@ export function initSessions({ toast, confirmDialog, promptDialog, escapeHtml, g
     isHosting: () => !!hosting,
     isGuest: () => !!guesting,
     hostEngine: () => hosting?.engine || null,
+    hostSid: () => hosting?.sid || null,
     // the open project is closing: a host's session ends with it; a guest
     // closing the session's project leaves (after the close has finished)
     projectClosing: (p) => {

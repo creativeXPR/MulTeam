@@ -19,7 +19,8 @@
     "test:members": "firebase emulators:exec --project demo-multeam --only auth,firestore,functions,database \"node tests/emulator/members.mjs\"",
     "test:collab-ui": "firebase emulators:exec --project demo-multeam --only auth,firestore,functions,database \"electron tests/emulator/collabUi.cjs\"",
     "icons": "electron build/make-icons.js",
-    "test:sessions-ui": "firebase emulators:exec --project demo-multeam --only auth,firestore,functions,database \"electron tests/emulator/sessionsUi.cjs\""
+    "test:sessions-ui": "firebase emulators:exec --project demo-multeam --only auth,firestore,functions,database \"electron tests/emulator/sessionsUi.cjs\"",
+    "test:follow-ui": "firebase emulators:exec --project demo-multeam --only auth,firestore,functions,database \"electron tests/emulator/followUi.cjs\""
   },
   "keywords": [],
   "author": "",

@@ -66,6 +66,26 @@ await check('the host switches the guest to read-only', async () => {
   await assertFails(db('guest').ref(`${docPath}/updates`).push(upd));
   await assertSucceeds(db('guest').ref(`${docPath}/awareness/5`).set('AAA='));
 });
+// presence (follow mode, stage 5)
+const pres = (uid, extra = {}) => ({ uid, name: uid, at: Date.now(), file: 'app.js', shared: true, top: 1, line: 1, ...extra });
+await check('presence: an admitted guest announces themselves', () => assertSucceeds(db('guest').ref(`sessions/${S}/presence/g1`).set(pres('guest'))));
+await check('presence: nobody can write as someone else', async () => {
+  await assertFails(db('guest').ref(`sessions/${S}/presence/g2`).set(pres('host')));
+  await assertFails(db('guest').ref(`sessions/${S}/presence/h1`).set(pres('guest')).then(() => db('host').ref(`sessions/${S}/presence/h1`).set(pres('host'))));
+});
+await check('presence: a waiting/unknown person cannot', () => assertFails(db('eve').ref(`sessions/${S}/presence/e1`).set(pres('eve'))));
+await check('presence: the host can clear a removed guest', () => assertSucceeds(db('host').ref(`sessions/${S}/presence/g1`).remove()));
+await check('presence: project members only, own entry only', async () => {
+  await env.withSecurityRulesDisabled((c) => c.database().ref('projectMembers/pp1').set({ olu: 'owner', mate: 'viewer', ed: 'editor' }));
+  await assertSucceeds(db('mate').ref('projects/pp1/presence/m1').set(pres('mate', { branch: 'main' })));
+  await assertSucceeds(db('olu').ref('projects/pp1/presence').get());
+  await assertFails(db('olu').ref('projects/pp1/presence/m1').set(pres('olu')));
+  await assertFails(db('ed').ref('projects/pp1/presence/m1').remove()); // (the owner may: deleting a project clears it all)
+  await assertFails(db('eve').ref('projects/pp1/presence').get());
+  await assertFails(db('eve').ref('projects/pp1/presence/e1').set(pres('eve')));
+  await assertSucceeds(db('mate').ref('projects/pp1/presence/m1').remove());
+});
+
 await check('a denied guest sees nothing', async () => {
   await db('eve').ref(`sessions/${S}/members/eve`).set(member('pending', 'editor', 'Eve'));
   await assertSucceeds(db('host').ref(`sessions/${S}/members/eve/status`).set('denied'));

@@ -6,7 +6,7 @@ import { initSessions, sessionIdFrom } from './session.js';
 import { createLiveProject } from './liveProject.js';
 import { requireAuth, openSignIn } from './authModal.js';
 import { FileDocument, EditorView, setMonacoTheme } from './editor.js';
-import { PresenceBar } from './presence.js';
+import { initFollow } from './follow.js';
 import { applyStoredTheme, setTheme, getTheme, getEffectiveTheme, setAccent, getAccentChoice, hasAppPalette } from './theme.js';
 import { getSettings, updateSettings, monacoOptionsFromSettings } from './settings.js';
 import { initCommandPalette } from './commandPalette.js';
@@ -73,7 +73,6 @@ let rootFolder = null;
 // The FOCUSED editor group's view and file (kept under these names so the
 // rest of the app — menus, plugins, formatting, problems — stays unchanged).
 let activeWorkspace = null;
-let activePresence = null;
 let activeTabPath = null;
 let projectOpenedAt = null;
 let pendingReveal = null; // { path, line, column, length } applied once that file finishes opening
@@ -240,6 +239,7 @@ watchAuthState((user) => {
   renderDashboardCards();
   collab?.onAuth(user);
   if (user && project?.cloudEnabled && !liveSyncReady) startLiveSync();
+  refreshPresence();
 });
 
 document.getElementById('profileSigninBtn').addEventListener('click', () => openSignIn());
@@ -854,6 +854,7 @@ function startSessionSync() {
     onDenied: () => { if (!liveDeniedShown) { liveDeniedShown = true; toast("You can't reach this live session any more.", 'error'); } }
   });
   liveSyncReady = Promise.resolve(liveSync);
+  refreshPresence();
   return liveSyncReady;
 }
 
@@ -917,6 +918,8 @@ function startLiveSync() {
         toast("Live editing isn't available for this project right now. You may not be a member, or you're offline. Edits stay local.", 'error');
       }
     });
+    liveBranch = st.isRepo ? st.branch : null;
+    refreshPresence();
     return liveSync;
   })();
   return liveSyncReady;
@@ -927,6 +930,8 @@ function stopLiveSync() {
   liveSync = null;
   liveSyncReady = null;
   liveRole = null;
+  liveBranch = null;
+  refreshPresence();
 }
 
 // Git moved HEAD (commit, pull, checkout…). A different branch = a different
@@ -998,6 +1003,7 @@ function closeProjectView() {
   const closing = project;
   sessions?.projectClosing(closing);
   project = null;
+  refreshPresence();
   rootFolder = null;
   projectOpenedAt = null;
   projectNameLabel.textContent = '';
@@ -1250,13 +1256,37 @@ function syncActive() {
   }
   updateFileMeta();
   languageSupport.refreshStatus();
-  const aw = activeWorkspace?.getAwareness();
-  if (activePresence?.awareness !== aw) {
-    activePresence?.destroy();
-    activePresence = null;
-    presenceListEl.innerHTML = '';
-    if (aw && currentUser) activePresence = new PresenceBar(presenceListEl, aw, currentUser);
-  }
+  refreshPresence();
+  publishWhere();
+}
+
+// ---------- presence + follow mode (follow.js) ----------
+let follow = null;
+let liveBranch = null;
+
+// where everyone in this project / session announces themselves
+function presencePath() {
+  if (!project || !currentUser) return null;
+  if (project.session) return liveSync ? `sessions/${project.session.sid}/presence` : null;
+  const hosted = sessions?.hostSid?.();
+  if (hosted) return `sessions/${hosted}/presence`;
+  if (project.cloudEnabled && liveSync) return `projects/${project.id}/presence`;
+  return null;
+}
+function refreshPresence() { follow?.setChannel(presencePath()); }
+
+// which file I'm in and where I'm looking (the focused editor)
+function publishWhere() {
+  if (!follow) return;
+  const g = focusedGroup;
+  const ed = g?.view?.editor;
+  if (!ed || !rootFolder || !g.activePath) { follow.setWhere({}); return; }
+  follow.setWhere({
+    file: relOf(g.activePath),
+    shared: !!g.view.doc.collaborative,
+    top: ed.getVisibleRanges()[0]?.startLineNumber || 1,
+    line: ed.getPosition()?.lineNumber || 1
+  });
 }
 
 function orderedGroups(node = layout, out = []) {
@@ -1362,6 +1392,7 @@ function splitEditor(g = focusedGroup, zone = 'right') {
 
 function closeGroup(g = focusedGroup) {
   if (!g) return;
+  follow?.groupClosed(g.id);
   for (const p of [...g.tabs]) closeTab(p, { group: g });
   if (groups.has(g.id)) removeGroup(g);
 }
@@ -1503,6 +1534,9 @@ async function showInGroup(g, filePath) {
   g.view = new EditorView(g.editorEl, doc, getEffectiveTheme());
   if (doc.readOnly) g.view.editor.updateOptions({ readOnly: true, readOnlyMessage: { value: "You're a viewer in this project, so you can watch and follow but not edit." } });
   g.view.editor.onDidFocusEditorWidget(() => focusGroup(g));
+  const announce = () => { if (focusedGroup === g) publishWhere(); };
+  g.view.editor.onDidScrollChange(announce);
+  g.view.editor.onDidChangeCursorPosition(announce);
   g.crumbs.setEditor(g.view.editor, filePath);
   if (focusedGroup === g) syncActive();
   pluginHost.emit('open', { path: filePath, language: g.view.languageId() });
@@ -1521,6 +1555,7 @@ function activateTab(filePath, group = focusedGroup) {
 
 async function openFile(filePath, { group = focusedGroup, index } = {}) {
   if (!group) return;
+  follow?.userAction();
   if (!group.tabs.some((p) => samePath(p, filePath))) {
     const at = index === undefined ? group.tabs.length : Math.max(0, Math.min(index, group.tabs.length));
     group.tabs.splice(at, 0, filePath);
@@ -2113,10 +2148,8 @@ function renderDashboardCards() {
   const liveEmpty = document.getElementById('liveSessionEmpty');
   const avatarsEl = document.getElementById('liveAvatars');
   const avatarsEmptyEl = document.getElementById('liveAvatarsEmpty');
-  const awareness = project && (project.cloudEnabled || project.session || hostEngine) && activeWorkspace ? activeWorkspace.getAwareness() : null;
-
-  if (awareness) {
-    const states = [...awareness.getStates().values()].filter((s) => s.user);
+  if (follow?.active()) {
+    const states = follow.people().map((p) => ({ user: { name: p.name, color: p.color } }));
     document.getElementById('liveSessionLabel').textContent = project.name;
     const mins = Math.max(0, Math.round((Date.now() - projectOpenedAt) / 60000));
     document.getElementById('liveSessionAmount').textContent = mins < 1 ? 'Just started' : `${mins} min${mins === 1 ? '' : 's'}`;
@@ -2404,6 +2437,9 @@ const palette = initCommandPalette({
     { label: 'Share Project…', action: () => setTimeout(() => (project?.cloudEnabled ? collab.openShare(project.id) : toast('Open a cloud project first (turn on cloud sync in Edit project)', 'error')), 0) },
     { label: 'Join Project…', action: () => setTimeout(() => collab.openJoin(), 0) },
     { label: 'Live Share: Start Live Session', action: () => setTimeout(() => sessions.startSession(), 0) },
+    { label: 'Live Share: Follow Me (ask everyone)', action: () => setTimeout(() => follow.askAll(), 0) },
+    { label: 'Live Share: Stop Follow Me', action: () => setTimeout(() => follow.stopAsking(), 0) },
+    { label: 'Live Share: Stop Following', action: () => setTimeout(() => follow.stopFollowing(), 0) },
     { label: 'Live Share: Join Live Session…', action: () => setTimeout(async () => { const link = await promptDialog({ title: 'Join a live session', label: 'Session link', placeholder: 'multeam://session/…', confirmLabel: 'Join' }); const sid = sessionIdFrom(link); if (sid) sessions.joinSession(sid); else if (link) toast("That isn't a live session link.", 'error'); }, 0) },
     { label: 'Toggle theme', action: () => applyTheme(getEffectiveTheme() === 'dark' ? 'light' : 'dark', { user: true }) },
     { label: 'Open settings', action: () => openSettings() },
@@ -2636,6 +2672,8 @@ initMenubar(document.getElementById('menubar'), [
     { label: 'Join Project…', run: () => collab.openJoin() },
     { label: 'Start Live Session…', run: () => sessions.startSession(), enabled: () => !!project && !project.session && !project.cloudEnabled && !sessions.isHosting() },
     { label: 'End Live Session…', run: () => sessions.endSession(), enabled: () => sessions.isHosting() },
+    { label: 'Ask Everyone to Follow Me', run: () => follow.askAll(), enabled: () => follow.active() && !follow.isAsking() },
+    { label: 'Stop Asking to Follow Me', run: () => follow.stopAsking(), enabled: () => follow.isAsking() },
     '-',
     { label: 'Save', kbd: 'Ctrl+S', run: () => saveActiveFile(activeTabPath, { explicit: true }), enabled: hasEditor },
     { label: 'Save As…', run: () => saveFileAs(activeTabPath), enabled: hasEditor },
@@ -2823,6 +2861,7 @@ sessions = initSessions({
     // the folder is shared first, so open editors bind to complete docs
     await engine?.treeShared;
     hostEngine = engine;
+    refreshPresence();
     if (project && !project.cloudEnabled) await reopenEditors({ save: true });
   },
   // guest: the session as a temporary project
@@ -2847,6 +2886,30 @@ sessions = initSessions({
     await refreshProjects();
   }
 });
+
+follow = initFollow({
+  el: presenceListEl,
+  toast,
+  confirmDialog,
+  escapeHtml,
+  getUser: () => currentUser,
+  getBranch: () => liveBranch,
+  focusedGroupId: () => focusedGroup?.id ?? null,
+  groupEl: (id) => groups.get(id)?.el || null,
+  groupAlive: (id) => groups.has(id),
+  // show `rel` in group `id`, scrolled to where the person you follow is
+  followInGroup: async (id, rel, { top }) => {
+    const g = groups.get(id);
+    if (!g || !rootFolder) return;
+    const abs = joinPath(rootFolder, rel);
+    if (!g.tabs.some((p) => samePath(p, abs))) { g.tabs.push(abs); renderGroupTabs(g); }
+    await showInGroup(g, abs);
+    const ed = g.view?.editor;
+    if (ed && groups.has(id)) ed.setScrollTop(ed.getTopForLineNumber(Math.max(1, top)));
+  },
+  onPeersChanged: () => { if (currentView === 'dashboard') renderDashboardCards(); }
+});
+refreshPresence();
 
 // Temporary session projects left behind (MulTeam closed mid-session).
 (async () => {

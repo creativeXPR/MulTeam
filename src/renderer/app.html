@@ -282,7 +282,7 @@
 
             <nav class="tutorial__toc">
               <a href="#h-start">Getting started</a><a href="#h-edit">Editing</a><a href="#h-run">Run</a>
-              <a href="#h-collab">Collaborate</a><a href="#h-live">Live sessions</a><a href="#h-git">Source Control</a><a href="#h-custom">Customize</a>
+              <a href="#h-collab">Collaborate</a><a href="#h-live">Live sessions</a><a href="#h-follow">Follow mode</a><a href="#h-git">Source Control</a><a href="#h-custom">Customize</a>
               <a href="#h-panels">Panels &amp; terminal</a><a href="#h-keys">Keyboard shortcuts</a>
             </nav>
 
@@ -341,6 +341,17 @@
                   <li><b>Joining</b>: open the <code>multeam://session/…</code> link, paste it into <b>Join project</b>, or use <b>Live Share: Join Live Session…</b> in the command palette. You get the host's whole project; your edits are saved on their computer.</li>
                   <li><b>Ending</b>: <b>End session</b> (or closing the project) disconnects everyone and deletes the session. Guests' temporary copies are removed; nothing stays on their computers.</li>
                   <li>Cloud projects are already live for their members, so use <b>Share</b> for them instead.</li>
+                </ul>
+              </section>
+
+              <section class="help__sec">
+                <h3 id="h-follow">Follow mode</h3>
+                <ul>
+                  <li><b>Who's here</b>: in a cloud project or live session, everyone in it appears as an avatar in the footer. Hover one to see which file they're in.</li>
+                  <li><b>Follow</b>: click someone's avatar. The editor group you're in opens the file they're in and scrolls with them; a coloured frame and a <b>Following</b> pill show it.</li>
+                  <li><b>Stop</b>: type, scroll, click in the editor, open a file, press <kbd>Esc</kbd>, or click their avatar again.</li>
+                  <li><b>Files that aren't shared</b> (like <code>.env</code>): you keep following, with a note saying where they are; you catch up when they open a shared file.</li>
+                  <li><b>Follow me</b>: click <b>Follow me</b> in the footer (or <b>File → Ask Everyone to Follow Me</b>) for a walkthrough. Everyone else is asked and can decline; the footer shows how many follow you.</li>
                 </ul>
               </section>
 
